@@ -1,0 +1,125 @@
+# Herdr Web Terminal
+
+A small, self-hosted web terminal for Herdr. The Bun server binds only to `127.0.0.1`, owns Bun-native PTYs, and serves a React PWA rendered by `ghostty-web`/libghostty WASM.
+
+## Local development
+
+Requirements: macOS, [Bun](https://bun.sh), and `herdr` on `PATH`.
+
+```sh
+bun install
+bun dev
+```
+
+Open <http://localhost:8787>. One Bun process serves the imported HTML/React frontend, hot reloads it during development, and runs the application server on `127.0.0.1:8787`.
+
+The app uses Bun's native HTML bundler, method-specific route table, path parameters, WebSocket upgrade, and file responses. There is no frontend dev server, proxy, or routing framework.
+
+For a production-mode local run without HMR:
+
+```sh
+bun start
+```
+
+`bun run build` validates Bun's production bundle separately.
+
+Useful checks:
+
+```sh
+bun run typecheck
+bun test
+bun run build
+```
+
+## Sessions and persistence
+
+The start screen lists Herdr's named sessions. You can:
+
+- enter a new name to run `herdr --session <name>`;
+- select an existing name to run `herdr session attach <name>`;
+- use the back button to switch terminals without stopping the prior PTY.
+
+The Bun process keeps each opened PTY alive when Safari disconnects. It retains the latest 1 MiB of raw PTY output and replays it when the browser reconnects. ANSI data is forwarded as arbitrary chunks and is never parsed by the server.
+
+The server reads Ghostty's effective local configuration with `ghostty +show-config`. The terminal applies its regular and bold font faces, font size, cell width/height adjustments, window padding, cursor style/blink behavior, foreground/background, selection colors, and first 16 ANSI palette colors. Paired `light:…,dark:…` themes follow `window-theme`; `system` follows the browser device's appearance. If the configured font is installed as an OTF, TTF, WOFF, or WOFF2 file in a standard macOS font directory, the server makes it available to the authenticated browser. Set `GHOSTTY_BIN` if the Ghostty executable is installed in a nonstandard location.
+
+`ghostty-web` uses Ghostty's terminal parser but a browser Canvas renderer, not Ghostty's native Metal renderer. Font rasterization, ligature shaping, custom shaders, macOS-only font thickening, and some cursor/cell metric details cannot be pixel-identical to the native application.
+
+`ghostty-web@0.4.0` does not expose cell-metric adjustments. This project carries a small [`patchedDependencies`](./patches/ghostty-web@0.4.0.patch) patch that applies Ghostty's pixel/percentage width and height adjustments during font measurement. Remove it when upstream exposes equivalent options.
+
+Herdr remains the source of durable session state. If the Bun server restarts, its PTYs and replay buffers are lost, but Herdr's named sessions continue running and appear on the start screen for re-attachment. No tmux-like persistence layer is added.
+
+Transport is WebSocket first. After repeated WebSocket connection failures the browser falls back to SSE for output and `POST` for input/resize. Network and foreground changes trigger automatic reconnection.
+
+## iPhone controls and PWA
+
+The terminal uses the full available viewport, including iPhone safe areas. Tap the terminal to focus the software keyboard. The top-right **Keys** menu includes `Ctrl`, `Alt`, `Esc`, `Tab`, and arrow keys.
+
+When an application enables terminal mouse reporting, clicks, taps, drags, and wheel events are encoded as terminal cell events and forwarded to its PTY. This makes Herdr's TUI directly operable without pretending its painted terminal cells are DOM controls.
+
+`Ctrl` and `Alt` latch for the next key. For example, tap `Ctrl`, then type `C` or `B` on the software keyboard. The modifier clears after that input.
+
+To install: open the HTTPS hostname in Safari, tap Share, choose **Add to Home Screen**, then open Herdr from the new Home Screen icon. Standalone mode and status-bar metadata are included.
+
+## Cloudflare Tunnel
+
+The app has no Cloudflare-specific code. Keep it on loopback and let `cloudflared` make the outbound connection.
+
+Install and authenticate:
+
+```sh
+brew install cloudflared
+cloudflared tunnel login
+cloudflared tunnel create herdr-terminal
+cloudflared tunnel route dns herdr-terminal herdr.example.com
+```
+
+Create `~/.cloudflared/config.yml`, replacing the UUID and account path:
+
+```yaml
+tunnel: YOUR-TUNNEL-UUID
+credentials-file: /Users/YOU/.cloudflared/YOUR-TUNNEL-UUID.json
+
+ingress:
+  - hostname: herdr.example.com
+    service: http://127.0.0.1:8787
+  - service: http_status:404
+```
+
+Validate and run:
+
+```sh
+cloudflared tunnel ingress validate
+cloudflared tunnel run herdr-terminal
+```
+
+Cloudflare Tunnel supports WebSockets without an application change. Use a named tunnel rather than a Quick Tunnel: Cloudflare documents that Quick Tunnels do not support SSE, which this app uses as its fallback. See Cloudflare's [locally-managed tunnel guide](https://developers.cloudflare.com/tunnel/advanced/local-management/create-local-tunnel/), [configuration reference](https://developers.cloudflare.com/tunnel/advanced/local-management/configuration-file/), and [Tunnel FAQ](https://developers.cloudflare.com/cloudflare-one/faq/cloudflare-tunnels-faq/).
+
+### Cloudflare Access
+
+Before using the public hostname, create a **Self-hosted** Access application for `herdr.example.com` under Zero Trust → Access controls → Applications. Add an Allow policy limited to your identity or identity-provider group. Cloudflare's [self-hosted application guide](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/) covers the dashboard flow.
+
+Do not add an Access bypass policy. This application intentionally has no account system; anyone who reaches it can control Herdr and therefore a local terminal.
+
+## API
+
+- `GET /api/sessions`
+- `GET /api/appearance`
+- `GET /api/appearance/font`
+- `POST /api/sessions` with `{ "name": "work", "mode": "create" | "attach" }`
+- `GET /api/session/:id/ws`
+- `GET /api/session/:id/events`
+- `POST /api/session/:id/input`
+- `POST /api/session/:id/resize`
+
+WebSocket client messages are `input` or `resize`; server messages are `output` or `status`, matching `src/shared/protocol.ts`.
+
+## Limitations
+
+- Single trusted operator; no in-app authentication or authorization.
+- Session registry and 1 MiB replay buffers live in Bun memory.
+- If two browsers attach to one web session, both can send input and the latest resize wins.
+- Herdr's own session history/state survives app-server restarts; the browser terminal's prior scrollback does not.
+- iOS may suspend network activity in the background. Herdr continues; output resumes after reconnection.
+- The fallback is SSE plus `POST`; long polling is not implemented.
+- Ghostty settings without a browser-renderer equivalent, including custom shaders and macOS font thickening, are ignored.

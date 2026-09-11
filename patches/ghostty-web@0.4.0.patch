@@ -1,0 +1,90 @@
+diff --git a/dist/ghostty-web.js b/dist/ghostty-web.js
+index a4ca427b95288e70c782ce303013cd644893dcec..7fd74da6f81c0ecfeb62f0f52fb3b66c2f4e3319 100644
+--- a/dist/ghostty-web.js
++++ b/dist/ghostty-web.js
+@@ -1338,7 +1338,7 @@ class $ {
+     const g = A.getContext("2d", { alpha: !0 });
+     if (!g)
+       throw new Error("Failed to get 2D rendering context");
+-    this.ctx = g, this.fontSize = B.fontSize ?? 15, this.fontFamily = B.fontFamily ?? "monospace", this.cursorStyle = B.cursorStyle ?? "block", this.cursorBlink = B.cursorBlink ?? !1, this.theme = { ...f, ...B.theme }, this.devicePixelRatio = B.devicePixelRatio ?? window.devicePixelRatio ?? 1, this.palette = [
++    this.ctx = g, this.fontSize = B.fontSize ?? 15, this.fontFamily = B.fontFamily ?? "monospace", this.cellWidthAdjustment = B.cellWidthAdjustment, this.cellHeightAdjustment = B.cellHeightAdjustment, this.cursorStyle = B.cursorStyle ?? "block", this.cursorBlink = B.cursorBlink ?? !1, this.theme = { ...f, ...B.theme }, this.devicePixelRatio = B.devicePixelRatio ?? window.devicePixelRatio ?? 1, this.palette = [
+       this.theme.black,
+       this.theme.red,
+       this.theme.green,
+@@ -1363,8 +1363,14 @@ class $ {
+   measureFont() {
+     const B = document.createElement("canvas").getContext("2d");
+     B.font = `${this.fontSize}px ${this.fontFamily}`;
+-    const g = B.measureText("M"), E = Math.ceil(g.width), C = g.actualBoundingBoxAscent || this.fontSize * 0.8, I = g.actualBoundingBoxDescent || this.fontSize * 0.2, D = Math.ceil(C + I) + 2, i = Math.ceil(C) + 1;
+-    return { width: E, height: D, baseline: i };
++    const g = B.measureText("M"), E = Math.ceil(g.width), C = g.actualBoundingBoxAscent || this.fontSize * 0.8, I = g.actualBoundingBoxDescent || this.fontSize * 0.2, D = Math.ceil(C + I) + 2, i = Math.ceil(C) + 1, w = this.adjustMetric(E, this.cellWidthAdjustment), s = this.adjustMetric(D, this.cellHeightAdjustment);
++    return { width: w, height: s, baseline: i + Math.round((s - D) / 2) };
++  }
++  adjustMetric(A, B) {
++    if (!B)
++      return A;
++    const g = B.unit === "percent" ? A * B.value / 100 : B.value;
++    return Math.max(1, Math.round(A + g));
+   }
+   /**
+    * Remeasure font metrics (call after font loads or changes)
+@@ -2203,6 +2209,8 @@ class IA {
+       scrollback: A.scrollback ?? 1e4,
+       fontSize: A.fontSize ?? 15,
+       fontFamily: A.fontFamily ?? "monospace",
++      cellWidthAdjustment: A.cellWidthAdjustment,
++      cellHeightAdjustment: A.cellHeightAdjustment,
+       allowTransparency: A.allowTransparency ?? !1,
+       convertEol: A.convertEol ?? !1,
+       disableStdin: A.disableStdin ?? !1,
+@@ -2338,6 +2346,8 @@ class IA {
+       }), this.renderer = new $(this.canvas, {
+         fontSize: this.options.fontSize,
+         fontFamily: this.options.fontFamily,
++        cellWidthAdjustment: this.options.cellWidthAdjustment,
++        cellHeightAdjustment: this.options.cellHeightAdjustment,
+         cursorStyle: this.options.cursorStyle,
+         cursorBlink: this.options.cursorBlink,
+         theme: this.options.theme
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 19c99f9caf2f6b006496c0db3b32ea4ea96496a6..32109c1ca34a2cf97047ad0b2469013d0f65848e 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -3,6 +3,8 @@ export declare class CanvasRenderer {
+     private ctx;
+     private fontSize;
+     private fontFamily;
++    private cellWidthAdjustment;
++    private cellHeightAdjustment;
+     private cursorStyle;
+     private cursorBlink;
+     private theme;
+@@ -891,6 +893,8 @@ export declare interface ITerminalOptions {
+     scrollback?: number;
+     fontSize?: number;
+     fontFamily?: string;
++    cellWidthAdjustment?: MetricAdjustment;
++    cellHeightAdjustment?: MetricAdjustment;
+     allowTransparency?: boolean;
+     convertEol?: boolean;
+     disableStdin?: boolean;
+@@ -1261,12 +1265,19 @@ export declare class OSC8LinkProvider implements ILinkProvider {
+ export declare interface RendererOptions {
+     fontSize?: number;
+     fontFamily?: string;
++    cellWidthAdjustment?: MetricAdjustment;
++    cellHeightAdjustment?: MetricAdjustment;
+     cursorStyle?: 'block' | 'underline' | 'bar';
+     cursorBlink?: boolean;
+     theme?: ITheme;
+     devicePixelRatio?: number;
+ }
+ 
++export declare interface MetricAdjustment {
++    value: number;
++    unit: 'pixels' | 'percent';
++}
++
+ /**
+  * Colors from RenderState (12 bytes packed)
+  */

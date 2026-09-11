@@ -1,0 +1,430 @@
+@import "@fontsource-variable/geist/index.css";
+@import "@fontsource-variable/geist-mono/index.css";
+
+:root {
+  color-scheme: dark;
+  font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  font-synthesis: none;
+  color: #e4e4e7;
+  background: #09090b;
+  -webkit-font-smoothing: antialiased;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --terminal-background: #09090b;
+  --terminal-foreground: #e4e4e7;
+  --terminal-padding-top: 2px;
+  --terminal-padding-right: 2px;
+  --terminal-padding-bottom: 2px;
+  --terminal-padding-left: 2px;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  width: 100%;
+  height: var(--app-height, 100dvh);
+  margin: 0;
+  overflow: hidden;
+}
+body {
+  overscroll-behavior: none;
+  background: #09090b;
+}
+button,
+input {
+  font: inherit;
+}
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app {
+  isolation: isolate;
+  min-height: var(--app-height, 100dvh);
+}
+.session-page {
+  overflow-y: auto;
+  padding: max(2rem, var(--safe-top)) max(1.25rem, var(--safe-right))
+    max(2rem, var(--safe-bottom)) max(1.25rem, var(--safe-left));
+}
+.session-picker {
+  width: min(100%, 34rem);
+  margin-inline: auto;
+}
+.brand-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  padding: 1rem 0 2.25rem;
+}
+.brand-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.625rem;
+  background: #10b981;
+  color: #052e25;
+  font:
+    600 1.125rem/1 "Geist Mono Variable",
+    monospace;
+}
+h1,
+h2,
+p {
+  margin: 0;
+}
+h1 {
+  color: #fafafa;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.brand-header p {
+  max-width: 34ch;
+  padding-top: 0.25rem;
+  color: #a1a1aa;
+  font-size: 1rem;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+.new-session {
+  padding-bottom: 2rem;
+}
+.new-session label,
+.session-list-header h2 {
+  display: block;
+  padding-bottom: 0.625rem;
+  color: #d4d4d8;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+.new-session-controls {
+  display: flex;
+  min-width: 0;
+  gap: 0.625rem;
+}
+.new-session input {
+  min-width: 0;
+  flex: 1;
+  height: 2.75rem;
+  border: 1px solid #3f3f46;
+  border-radius: 0.5rem;
+  outline: none;
+  background: #18181b;
+  padding: 0 0.75rem;
+  color: #fafafa;
+  font-size: 1rem;
+}
+.new-session input::placeholder {
+  color: #71717a;
+}
+.new-session input:focus-visible {
+  border-color: #10b981;
+  outline: 2px solid rgb(16 185 129 / 25%);
+  outline-offset: 0;
+}
+.primary-button {
+  display: inline-flex;
+  height: 2.75rem;
+  align-items: center;
+  gap: 0.375rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: #10b981;
+  padding: 0 0.875rem 0 0.625rem;
+  color: #052e25;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.primary-button svg,
+.icon-button svg {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+.primary-button:disabled {
+  opacity: 0.45;
+}
+.primary-button:focus-visible,
+.icon-button:focus-visible,
+.key:focus-visible {
+  outline: 2px solid #34d399;
+  outline-offset: 2px;
+}
+.form-error {
+  padding-top: 0.5rem;
+  color: #fda4af;
+  font-size: 0.875rem;
+}
+.session-list-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  border-bottom: 1px solid rgb(255 255 255 / 10%);
+}
+.text-button {
+  border: 0;
+  background: transparent;
+  padding: 0.5rem 0;
+  color: #6ee7b7;
+  font-size: 0.875rem;
+}
+.session-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.session-list li + li {
+  border-top: 1px solid rgb(255 255 255 / 7%);
+}
+.session-row {
+  display: flex;
+  width: 100%;
+  min-height: 3.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 0;
+  background: transparent;
+  padding: 0.75rem 0.25rem;
+  color: inherit;
+  text-align: left;
+}
+.session-row:active {
+  background: rgb(255 255 255 / 4%);
+}
+.session-name {
+  min-width: 0;
+  overflow: hidden;
+  color: #f4f4f5;
+  font-family: "Geist Mono Variable", monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-meta,
+.connection {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.375rem;
+  color: #a1a1aa;
+  font-size: 0.8125rem;
+}
+.status-dot,
+.connection > span {
+  width: 0.4375rem;
+  height: 0.4375rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: #71717a;
+}
+.status-running,
+.connection-connected > span {
+  background: #34d399;
+}
+.status-stopped,
+.connection-disconnected > span {
+  background: #fb7185;
+}
+.connection-connecting > span {
+  background: #fbbf24;
+}
+.empty-state {
+  padding: 2rem 0;
+  color: #71717a;
+  font-size: 1rem;
+  text-align: center;
+}
+
+.terminal-page {
+  display: grid;
+  height: var(--app-height, 100dvh);
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--terminal-background);
+}
+.terminal-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.625rem;
+  padding: calc(var(--safe-top) + 0.375rem) max(0.625rem, var(--safe-right))
+    0.375rem max(0.625rem, var(--safe-left));
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--terminal-foreground) 12%, transparent);
+  background: var(--terminal-background);
+}
+.icon-button {
+  position: relative;
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 0;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: #a1a1aa;
+}
+.icon-button::after {
+  position: absolute;
+  width: max(100%, 3rem);
+  height: max(100%, 3rem);
+  content: "";
+}
+.session-title {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 0.625rem;
+}
+.session-title p {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--terminal-foreground);
+  font:
+    500 0.875rem/1.25rem "Geist Mono Variable",
+    monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-shell {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  background: var(--terminal-background);
+}
+.terminal-shell[data-ready="true"] {
+  opacity: 1;
+}
+.terminal-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  padding: var(--terminal-padding-top)
+    max(var(--terminal-padding-right), var(--safe-right))
+    max(var(--terminal-padding-bottom), var(--safe-bottom))
+    max(var(--terminal-padding-left), var(--safe-left));
+  touch-action: none;
+}
+.terminal-canvas canvas {
+  max-width: 100%;
+}
+.keys-trigger {
+  display: inline-flex;
+  height: 2rem;
+  align-items: center;
+  gap: 0.375rem;
+  border: 0;
+  border-radius: 0.375rem;
+  background: #27272a;
+  padding: 0 0.625rem 0 0.5rem;
+  color: #d4d4d8;
+  font-size: 0.8125rem;
+}
+.keys-trigger svg {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+}
+.keys-trigger:focus-visible {
+  outline: 2px solid #34d399;
+  outline-offset: 2px;
+}
+.keys-positioner {
+  z-index: 20;
+}
+.keys-popup {
+  width: min(20rem, calc(100vw - 1rem));
+  border-radius: 0.625rem;
+  background: #18181b;
+  padding: 0.5rem;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 12%);
+  transform-origin: var(--transform-origin);
+  transition:
+    opacity 100ms ease-out,
+    transform 100ms ease-out;
+}
+.keys-popup[data-starting-style],
+.keys-popup[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.98);
+}
+.keys-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.375rem;
+}
+.key {
+  position: relative;
+  min-width: 0;
+  height: 2.75rem;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 0.4375rem;
+  background: #27272a;
+  padding: 0 0.625rem;
+  color: #e4e4e7;
+  font:
+    500 0.8125rem/1 "Geist Mono Variable",
+    monospace;
+}
+.key:active,
+.key[aria-pressed="true"] {
+  border-color: #34d399;
+  background: #064e3b;
+  color: #d1fae5;
+}
+
+@media (hover: hover) {
+  .session-row:hover,
+  .icon-button:hover,
+  .text-button:hover {
+    background: rgb(255 255 255 / 5%);
+  }
+  .primary-button:not(:disabled):hover {
+    background: #34d399;
+  }
+  .keys-trigger:hover,
+  .key:hover {
+    background: #3f3f46;
+  }
+}
+
+@media (min-width: 640px) {
+  .session-page {
+    padding-top: 4rem;
+  }
+  .brand-header p,
+  .empty-state {
+    font-size: 0.875rem;
+  }
+  .new-session input {
+    height: 2.375rem;
+    font-size: 0.875rem;
+  }
+  .primary-button {
+    height: 2.375rem;
+  }
+  .terminal-header {
+    padding-top: 0.375rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
