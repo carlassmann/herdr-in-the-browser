@@ -1,3 +1,4 @@
+import { AlertDialog } from "@base-ui/react/alert-dialog";
 import { ArrowLeftIcon, PlusIcon, StopIcon } from "@heroicons/react/16/solid";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SessionMode, SessionSummary } from "../shared/protocol";
@@ -16,13 +17,23 @@ export function App() {
   const [connection, setConnection] = useState<TransportState>("connecting");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [stopDialogOpen, setStopDialogOpen] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const openedSessionRef = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const response = await fetch("/api/sessions");
+      if (!response.ok) {
+        throw new Error(
+          await responseError(response, "Could not load sessions."),
+        );
+      }
       const body = (await response.json()) as { sessions: SessionSummary[] };
       setSessions(body.sessions);
+      setError("");
+    } catch (error) {
+      setError(errorMessage(error, "Could not load sessions."));
     } finally {
       setLoading(false);
     }
@@ -50,41 +61,53 @@ export function App() {
   const openSession = async (name: string, mode: SessionMode) => {
     openedSessionRef.current = name;
     setError("");
-    const response = await fetch("/api/sessions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, mode }),
-    });
-    const body = (await response.json()) as {
-      session?: SessionSummary;
-      error?: string;
-    };
-    if (!response.ok || !body.session) {
+    try {
+      const response = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, mode }),
+      });
+      if (!response.ok) {
+        throw new Error(
+          await responseError(response, "Could not open that session."),
+        );
+      }
+      const body = (await response.json()) as { session?: SessionSummary };
+      if (!body.session) throw new Error("Could not open that session.");
+      const session = body.session;
+      setSessions((current) => [
+        session,
+        ...current.filter((item) => item.name !== session.name),
+      ]);
+      localStorage.setItem(LAST_SESSION_KEY, session.name);
+      setActiveSession(session.name);
+    } catch (error) {
       openedSessionRef.current = null;
-      const message = body.error ?? "Could not open that session.";
+      const message = errorMessage(error, "Could not open that session.");
       setError(message);
       throw new Error(message);
     }
-    setSessions((current) => [
-      body.session!,
-      ...current.filter((item) => item.name !== body.session!.name),
-    ]);
-    localStorage.setItem(LAST_SESSION_KEY, body.session.name);
-    setActiveSession(body.session.name);
   };
 
   const stopSession = async () => {
     if (!activeSession) return;
-    const response = await fetch(
-      `/api/session/${encodeURIComponent(activeSession)}`,
-      { method: "DELETE" },
-    );
-    if (!response.ok) {
-      const body = (await response.json()) as { error?: string };
-      setError(body.error ?? "Could not stop that session.");
-      return;
+    setStopping(true);
+    try {
+      const response = await fetch(
+        `/api/session/${encodeURIComponent(activeSession)}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) {
+        setError(await responseError(response, "Could not stop that session."));
+        return;
+      }
+      setStopDialogOpen(false);
+      leaveTerminal();
+    } catch (error) {
+      setError(errorMessage(error, "Could not stop that session."));
+    } finally {
+      setStopping(false);
     }
-    leaveTerminal();
   };
 
   const leaveTerminal = () => {
@@ -116,14 +139,53 @@ export function App() {
                 {connection}
               </span>
             </div>
-            <button
-              type="button"
-              className="icon-button"
-              aria-label={`Stop ${activeSession}`}
-              onClick={() => void stopSession()}
+            <AlertDialog.Root
+              open={stopDialogOpen}
+              onOpenChange={(open) => {
+                if (stopping) return;
+                setStopDialogOpen(open);
+                if (open) setError("");
+              }}
             >
-              <StopIcon aria-hidden="true" />
-            </button>
+              <AlertDialog.Trigger
+                className="icon-button"
+                aria-label={`Stop ${activeSession}`}
+              >
+                <StopIcon aria-hidden="true" />
+              </AlertDialog.Trigger>
+              <AlertDialog.Portal>
+                <AlertDialog.Backdrop className="dialog-backdrop" />
+                <AlertDialog.Popup className="dialog-popup">
+                  <AlertDialog.Title className="dialog-title">
+                    Stop {activeSession}?
+                  </AlertDialog.Title>
+                  <AlertDialog.Description className="dialog-description">
+                    Running work in this terminal will end.
+                  </AlertDialog.Description>
+                  {error ? (
+                    <p className="dialog-error" role="alert">
+                      {error}
+                    </p>
+                  ) : null}
+                  <div className="dialog-actions">
+                    <AlertDialog.Close
+                      className="dialog-button"
+                      disabled={stopping}
+                    >
+                      Cancel
+                    </AlertDialog.Close>
+                    <button
+                      type="button"
+                      className="dialog-button dialog-button-danger"
+                      disabled={stopping}
+                      onClick={() => void stopSession()}
+                    >
+                      {stopping ? "Stopping…" : "Stop session"}
+                    </button>
+                  </div>
+                </AlertDialog.Popup>
+              </AlertDialog.Portal>
+            </AlertDialog.Root>
             <MobileToolbar sessionId={activeSession} />
           </header>
           <TerminalView
@@ -176,7 +238,7 @@ export function App() {
                     void openSession(
                       session.name,
                       session.status === "running" ? "attach" : "create",
-                    )
+                    ).catch(() => {})
                   }
                 >
                   <span className="session-name">{session.name}</span>
@@ -199,6 +261,24 @@ export function App() {
   );
 }
 
+async function responseError(
+  response: Response,
+  fallback: string,
+): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    return typeof body.error === "string" ? body.error : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.name === "Error"
+    ? error.message
+    : fallback;
+}
+
 function NewSessionForm({
   error,
   onCreate,
@@ -215,7 +295,9 @@ function NewSessionForm({
       onSubmit={(event) => {
         event.preventDefault();
         setSubmitting(true);
-        void onCreate(name).finally(() => setSubmitting(false));
+        void onCreate(name)
+          .catch(() => {})
+          .finally(() => setSubmitting(false));
       }}
     >
       <label htmlFor="session-name">New session</label>
