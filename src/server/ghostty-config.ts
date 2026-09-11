@@ -39,6 +39,7 @@ const fallback: TerminalAppearance = {
 };
 
 let appearancePromise: Promise<TerminalAppearance> | undefined;
+let cachedAppearance: TerminalAppearance | undefined;
 let effectiveConfigPromise: Promise<string | undefined> | undefined;
 const fontPromises = new Map<
   FontVariant,
@@ -47,7 +48,16 @@ const fontPromises = new Map<
 const fontPaths = new Map<string, string | undefined>();
 
 export function loadGhosttyAppearance(): Promise<TerminalAppearance> {
-  appearancePromise ??= buildGhosttyAppearance();
+  if (cachedAppearance) return Promise.resolve(cachedAppearance);
+  appearancePromise ??= buildGhosttyAppearance()
+    .then((appearance) => {
+      cachedAppearance = appearance;
+      return appearance;
+    })
+    .catch(() => structuredClone(fallback))
+    .finally(() => {
+      appearancePromise = undefined;
+    });
   return appearancePromise;
 }
 
@@ -251,7 +261,10 @@ function fontFamilyForVariant(
 }
 
 async function readEffectiveConfig(): Promise<string | undefined> {
-  effectiveConfigPromise ??= loadEffectiveConfig();
+  effectiveConfigPromise ??= loadEffectiveConfig().catch((error) => {
+    effectiveConfigPromise = undefined;
+    throw error;
+  });
   return effectiveConfigPromise;
 }
 

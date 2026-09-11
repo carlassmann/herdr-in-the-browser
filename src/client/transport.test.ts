@@ -2,9 +2,17 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { ReconnectingTransport } from "./transport";
 
 const originalFetch = globalThis.fetch;
+const originalLocation = globalThis.location;
+const originalWebSocket = globalThis.WebSocket;
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
+  Object.defineProperty(globalThis, "location", {
+    value: originalLocation,
+    configurable: true,
+    writable: true,
+  });
+  globalThis.WebSocket = originalWebSocket;
 });
 
 describe("SSE fallback input", () => {
@@ -39,5 +47,54 @@ describe("SSE fallback input", () => {
     finishFirst();
     await secondStarted;
     expect(posted).toHaveLength(2);
+  });
+
+  test("aborts an in-flight POST before reconnecting", async () => {
+    let markFirstStarted = () => {};
+    let markSecondStarted = () => {};
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const secondStarted = new Promise<void>((resolve) => {
+      markSecondStarted = resolve;
+    });
+    let requests = 0;
+    globalThis.fetch = ((_, init) => {
+      requests += 1;
+      if (requests > 1) {
+        markSecondStarted();
+        return Promise.resolve(new Response());
+      }
+      markFirstStarted();
+      return new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new Error("aborted")),
+        );
+      });
+    }) as typeof fetch;
+    Object.defineProperty(globalThis, "location", {
+      value: { protocol: "http:", host: "localhost" },
+      configurable: true,
+    });
+    class ConnectingWebSocket {
+      static readonly OPEN = 1;
+      readonly readyState = 0;
+      addEventListener() {}
+      close() {}
+    }
+    globalThis.WebSocket = ConnectingWebSocket as unknown as typeof WebSocket;
+    const transport = new ReconnectingTransport("demo", {
+      onMessage() {},
+      onState() {},
+      onFreshConnection() {},
+    });
+
+    transport.send({ type: "input", data: "before" });
+    await firstStarted;
+    transport.connect();
+    transport.send({ type: "input", data: "after" });
+
+    await secondStarted;
+    expect(requests).toBe(2);
   });
 });

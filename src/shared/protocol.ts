@@ -12,7 +12,6 @@ export type SessionMode = "create" | "attach";
 export interface SessionSummary {
   name: string;
   status: "running" | "stopped";
-  attached: boolean;
 }
 
 export interface TerminalAppearance {

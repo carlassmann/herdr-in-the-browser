@@ -17,7 +17,7 @@ const publicDirectory = join(process.cwd(), "public");
 const sessions = new SessionManager();
 
 interface SocketData {
-  sessionId: string;
+  sessionName: string;
   cursor: number;
   unsubscribe?: () => void;
 }
@@ -86,13 +86,13 @@ const server = Bun.serve<SocketData>({
         request: BunRequest<"/api/session/:id/ws">,
         server: Server<SocketData>,
       ) {
-        const sessionId = request.params.id;
-        if (!sessions.get(sessionId))
+        const sessionName = request.params.id;
+        if (!sessions.get(sessionName))
           return json({ error: "Session not found." }, 404);
         if (request.headers.get("upgrade")?.toLowerCase() !== "websocket")
           return json({ error: "WebSocket upgrade required." }, 426);
         const cursor = readCursor(request);
-        if (server.upgrade(request, { data: { sessionId, cursor } })) return;
+        if (server.upgrade(request, { data: { sessionName, cursor } })) return;
         return json({ error: "WebSocket upgrade failed." }, 400);
       }),
     },
@@ -165,7 +165,7 @@ const server = Bun.serve<SocketData>({
   },
   websocket: {
     open(socket) {
-      const session = sessions.get(socket.data.sessionId);
+      const session = sessions.get(socket.data.sessionName);
       if (!session) return socket.close(1008, "Session not found");
       socket.data.unsubscribe = session.subscribe(
         (message) => socket.send(JSON.stringify(message)),
@@ -173,7 +173,7 @@ const server = Bun.serve<SocketData>({
       );
     },
     message(socket, raw) {
-      const session = sessions.get(socket.data.sessionId);
+      const session = sessions.get(socket.data.sessionName);
       if (!session) return;
       try {
         const message: unknown = JSON.parse(

@@ -13,7 +13,7 @@ describe("terminal replay", () => {
     });
   });
 
-  test("requests a reset when the client's cursor predates retained chunks", () => {
+  test("requests a reset when the cursor is outside the current process", () => {
     const replay = new ReplayBuffer(5);
     replay.append("old");
     replay.append("new");
@@ -22,6 +22,12 @@ describe("terminal replay", () => {
       cursor: 3,
       reset: true,
       chunks: [{ data: "new", cursor: 6 }],
+    });
+
+    expect(new ReplayBuffer().after(999_999)).toMatchObject({
+      cursor: 0,
+      reset: true,
+      chunks: [],
     });
   });
 });

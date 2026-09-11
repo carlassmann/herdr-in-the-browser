@@ -129,11 +129,6 @@ export function TerminalView({
       fitAddon.fit();
       fitAddon.observeResize();
       transport.connect();
-      transport.send({
-        type: "resize",
-        cols: terminal.cols,
-        rows: terminal.rows,
-      });
       if (disposed) return;
       setReady(true);
       terminal.focus();

@@ -34,6 +34,7 @@ export class ReconnectingTransport implements Transport {
   connect(): void {
     this.closed = false;
     this.generation += 1;
+    this.abortController.abort();
     this.abortController = new AbortController();
     this.connectWebSocket();
   }

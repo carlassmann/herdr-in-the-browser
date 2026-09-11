@@ -76,6 +76,5 @@ async function listHerdrSessions(): Promise<SessionSummary[]> {
     .map(([name, status]) => ({
       name: name!,
       status: status === "running" ? "running" : "stopped",
-      attached: false,
     }));
 }

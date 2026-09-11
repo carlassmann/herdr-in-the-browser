@@ -40,7 +40,7 @@ export class ReplayBuffer {
     chunks: ReadonlyArray<{ data: string; cursor: number }>;
   } {
     const oldestCursor = this.cursor - this.bytes;
-    const reset = cursor < oldestCursor;
+    const reset = cursor < oldestCursor || cursor > this.cursor;
     const replayCursor = reset ? oldestCursor : cursor;
     return {
       cursor: replayCursor,
@@ -96,7 +96,6 @@ export class TerminalSession {
     return {
       name: this.name,
       status: this.running ? "running" : "stopped",
-      attached: this.listeners.size > 0,
     };
   }
 
