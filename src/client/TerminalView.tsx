@@ -8,7 +8,11 @@ import {
   watchSystemAppearance,
 } from "./appearance";
 import { encodeModifiedInput } from "./keyboard";
-import { encodeTerminalMouse } from "./terminal-mouse";
+import {
+  createWheelTickAccumulator,
+  encodeTerminalMouse,
+  wheelDeltaMode,
+} from "./terminal-mouse";
 import { useTerminalControls } from "./TerminalControls";
 import { ReconnectingTransport, type TransportState } from "./transport";
 
@@ -266,21 +270,25 @@ function attachMouseReporting(
     event.stopPropagation();
   };
 
+  const wheelTicks = createWheelTickAccumulator();
   terminal.attachCustomWheelEventHandler((event) => {
     if (!reportsMouse() || bypassesReporting(event)) return false;
-    send(
-      encodeTerminalMouse(
-        {
-          button: 3,
-          ...cellAt(event),
-          wheel: event.deltaY < 0 ? "up" : "down",
-          shift: event.shiftKey,
-          alt: event.altKey,
-          control: event.ctrlKey,
-        },
-        terminal.getMode(1006),
-      ),
+    const ticks = wheelTicks(event.deltaY, wheelDeltaMode(event.deltaMode), {
+      height: terminal.renderer!.getMetrics().height,
+      rows: terminal.rows,
+    });
+    const wheelEvent = encodeTerminalMouse(
+      {
+        button: 3,
+        ...cellAt(event),
+        wheel: ticks < 0 ? "up" : "down",
+        shift: event.shiftKey,
+        alt: event.altKey,
+        control: event.ctrlKey,
+      },
+      terminal.getMode(1006),
     );
+    for (let i = 0; i < Math.abs(ticks); i++) send(wheelEvent);
     return true;
   });
 

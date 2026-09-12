@@ -28,3 +28,34 @@ export function encodeTerminalMouse(
   const legacyCode = event.release ? 3 : code;
   return `\u001b[M${String.fromCharCode(legacyCode + 32, Math.min(col, 223) + 32, Math.min(row, 223) + 32)}`;
 }
+
+export type WheelDeltaMode = "pixel" | "line" | "page";
+
+export function wheelDeltaMode(deltaMode: number): WheelDeltaMode {
+  if (deltaMode === 1) return "line";
+  if (deltaMode === 2) return "page";
+  return "pixel";
+}
+
+// Trackpads fire many small pixel deltas per gesture; a terminal wheel event is
+// a whole line, so partial lines carry over until they add up to a full one.
+export function createWheelTickAccumulator() {
+  let carry = 0;
+  return (
+    deltaY: number,
+    mode: WheelDeltaMode,
+    cell: { height: number; rows: number },
+  ): number => {
+    const lines =
+      mode === "pixel"
+        ? deltaY / cell.height
+        : mode === "page"
+          ? deltaY * cell.rows
+          : deltaY;
+    if (Math.sign(lines) !== Math.sign(carry)) carry = 0;
+    carry += lines;
+    const ticks = Math.trunc(carry) || 0;
+    carry -= ticks;
+    return ticks;
+  };
+}
