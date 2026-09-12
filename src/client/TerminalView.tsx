@@ -13,6 +13,7 @@ import {
   encodeTerminalMouse,
   wheelDeltaMode,
 } from "./terminal-mouse";
+import { attachPaddingLayout } from "./terminal-padding";
 import { useTerminalControls } from "./TerminalControls";
 import { ReconnectingTransport, type TransportState } from "./transport";
 
@@ -88,11 +89,20 @@ export function TerminalView({
       await terminal.open(containerRef.current);
       if (disposed) return;
       terminalRef.current = terminal;
+      const paddingLayout = attachPaddingLayout(
+        containerRef.current,
+        terminal,
+        appearance,
+        theme,
+      );
+      disposeWithEffect(() => paddingLayout.dispose());
       if (appearance.colorScheme === "system") {
         disposeWithEffect(
           watchSystemAppearance(() => {
             applyAppearance(appearance);
-            repaintWithTheme(terminal, resolveAppearance(appearance).theme);
+            const { theme: nextTheme } = resolveAppearance(appearance);
+            repaintWithTheme(terminal, nextTheme);
+            paddingLayout.setTheme(nextTheme);
           }),
         );
       }

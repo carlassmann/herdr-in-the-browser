@@ -1,6 +1,11 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { extname, join } from "node:path";
-import type { MetricAdjustment, TerminalAppearance } from "../shared/protocol";
+import type {
+  MetricAdjustment,
+  PaddingBalance,
+  PaddingColor,
+  TerminalAppearance,
+} from "../shared/protocol";
 
 type FontVariant = "regular" | "bold" | "italic" | "bold-italic";
 
@@ -27,6 +32,8 @@ const fallback: TerminalAppearance = {
   fontFamily: "Geist Mono Variable",
   fontSize: 15,
   padding: { top: 2, right: 2, bottom: 2, left: 2 },
+  paddingBalance: "off",
+  paddingColor: "background",
   colorScheme: "system",
   cursorBlink: true,
   cursorStyle: "block",
@@ -173,6 +180,8 @@ export function parseGhosttyConfig(config: string): TerminalAppearance {
       bottom: verticalPadding[1],
       left: horizontalPadding[0],
     },
+    paddingBalance: parsePaddingBalance(values.get("window-padding-balance")),
+    paddingColor: parsePaddingColor(values.get("window-padding-color")),
     colorScheme:
       configuredColorScheme === "light" || configuredColorScheme === "dark"
         ? configuredColorScheme
@@ -393,6 +402,16 @@ function fontContentType(path: string): string {
   if (extension === ".woff") return "font/woff";
   if (extension === ".woff2") return "font/woff2";
   return "font/ttf";
+}
+
+function parsePaddingBalance(value: string | undefined): PaddingBalance {
+  if (value === "true") return "balanced";
+  if (value === "equal") return "equal";
+  return "off";
+}
+
+function parsePaddingColor(value: string | undefined): PaddingColor {
+  return value === "extend" || value === "extend-always" ? value : "background";
 }
 
 function parseBoolean(

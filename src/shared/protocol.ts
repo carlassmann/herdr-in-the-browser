@@ -25,6 +25,8 @@ export interface TerminalAppearance {
   cellWidthAdjustment?: MetricAdjustment;
   cellHeightAdjustment?: MetricAdjustment;
   padding: { top: number; right: number; bottom: number; left: number };
+  paddingBalance: PaddingBalance;
+  paddingColor: PaddingColor;
   colorScheme: "light" | "dark" | "system";
   cursorBlink: boolean;
   cursorStyle: "block" | "underline" | "bar";
@@ -32,6 +34,10 @@ export interface TerminalAppearance {
   lightTheme?: TerminalTheme;
   darkTheme?: TerminalTheme;
 }
+
+export type PaddingBalance = "off" | "balanced" | "equal";
+
+export type PaddingColor = "background" | "extend" | "extend-always";
 
 export interface MetricAdjustment {
   value: number;

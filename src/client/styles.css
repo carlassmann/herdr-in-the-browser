@@ -322,6 +322,7 @@ h1 {
 }
 .terminal-canvas {
   position: relative;
+  isolation: isolate;
   width: 100%;
   height: 100%;
   overflow: hidden;
@@ -334,6 +335,12 @@ h1 {
 }
 .terminal-canvas canvas {
   max-width: 100%;
+}
+.terminal-padding {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
 }
 .terminal-canvas textarea {
   font-size: 16px;

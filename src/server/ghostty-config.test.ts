@@ -10,6 +10,8 @@ describe("Ghostty appearance", () => {
       adjust-cell-height = 50%
       window-padding-x = 3,5
       window-padding-y = 4
+      window-padding-balance = true
+      window-padding-color = extend
       window-theme = system
       cursor-style = bar
       cursor-style-blink = false
@@ -31,6 +33,8 @@ describe("Ghostty appearance", () => {
       cellWidthAdjustment: { value: -1, unit: "pixels" },
       cellHeightAdjustment: { value: 50, unit: "percent" },
       padding: { top: 4, right: 5, bottom: 4, left: 3 },
+      paddingBalance: "balanced",
+      paddingColor: "extend",
       colorScheme: "system",
       cursorBlink: false,
       cursorStyle: "bar",
@@ -46,6 +50,16 @@ describe("Ghostty appearance", () => {
         brightBlack: "#888888",
         brightWhite: "#ffffff",
       },
+    });
+  });
+
+  test("defaults padding balance and color to Ghostty's defaults", () => {
+    expect(parseGhosttyConfig("font-size = 14")).toMatchObject({
+      paddingBalance: "off",
+      paddingColor: "background",
+    });
+    expect(parseGhosttyConfig("window-padding-balance = equal")).toMatchObject({
+      paddingBalance: "equal",
     });
   });
 
