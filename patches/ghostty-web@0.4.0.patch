@@ -1,8 +1,14 @@
+diff --git a/node_modules/ghostty-web/.bun-tag-27226167dcd96cba b/.bun-tag-27226167dcd96cba
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/node_modules/ghostty-web/.bun-tag-acbd94173e7d362f b/.bun-tag-acbd94173e7d362f
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/ghostty-web/.bun-tag-e2a4b0c3d9e3b383 b/.bun-tag-e2a4b0c3d9e3b383
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/ghostty-web.js b/dist/ghostty-web.js
-index a4ca427b95288e70c782ce303013cd644893dcec..6c2540f78baf02f704932b819d27a7116fce0939 100644
+index a4ca427b95288e70c782ce303013cd644893dcec..9a97f2656921dca8d2ad6481d7683b0eb23931fe 100644
 --- a/dist/ghostty-web.js
 +++ b/dist/ghostty-web.js
 @@ -1338,7 +1338,7 @@ class $ {
@@ -14,14 +20,40 @@ index a4ca427b95288e70c782ce303013cd644893dcec..6c2540f78baf02f704932b819d27a711
        this.theme.black,
        this.theme.red,
        this.theme.green,
-@@ -1363,8 +1363,14 @@ class $ {
+@@ -1363,8 +1363,40 @@ class $ {
    measureFont() {
      const B = document.createElement("canvas").getContext("2d");
      B.font = `${this.fontSize}px ${this.fontFamily}`;
 -    const g = B.measureText("M"), E = Math.ceil(g.width), C = g.actualBoundingBoxAscent || this.fontSize * 0.8, I = g.actualBoundingBoxDescent || this.fontSize * 0.2, D = Math.ceil(C + I) + 2, i = Math.ceil(C) + 1;
 -    return { width: E, height: D, baseline: i };
 +    const g = B.measureText("M"), E = Math.ceil(g.width), C = g.actualBoundingBoxAscent || this.fontSize * 0.8, I = g.actualBoundingBoxDescent || this.fontSize * 0.2, D = Math.ceil(C + I) + 2, i = Math.ceil(C) + 1, w = this.adjustMetric(E, this.cellWidthAdjustment), s = this.adjustMetric(D, this.cellHeightAdjustment);
-+    return { width: w, height: s, baseline: i + Math.round((s - D) / 2) };
++    return this.spriteGlyphBox = void 0, { width: w, height: s, baseline: i + Math.round((s - D) / 2) };
++  }
++  /**
++   * Ghostty rasterizes box drawing, block elements, legacy computing and
++   * Powerline glyphs itself so they always fill the cell exactly. Emulate
++   * that by stretching the font glyph to the cell, using the full block as
++   * the reference for the font's glyph box.
++   */
++  isSpriteGlyph(A) {
++    return A >= 9472 && A <= 9631 || A >= 129024 && A <= 129279 || A >= 57520 && A <= 57559;
++  }
++  measureSpriteGlyphBox() {
++    if (this.spriteGlyphBox !== void 0)
++      return this.spriteGlyphBox;
++    const A = document.createElement("canvas").getContext("2d");
++    A.font = `${this.fontSize}px ${this.fontFamily}`;
++    const B = A.measureText("\u2588"), g = B.actualBoundingBoxAscent + B.actualBoundingBoxDescent, E = B.actualBoundingBoxLeft + B.actualBoundingBoxRight;
++    return this.spriteGlyphBox = g > 0 && E > 0 ? { width: E, height: g, ascent: B.actualBoundingBoxAscent, left: B.actualBoundingBoxLeft } : null;
++  }
++  fillSpriteGlyph(A, B, g, E) {
++    // Measured glyph boxes run a hair wider than the rasterized shape, which
++    // leaves seams between adjacent cells. Overdraw by a pixel and clip.
++    const C = this.measureSpriteGlyphBox();
++    if (!C)
++      return !1;
++    const I = 1, D = (E + 2 * I) / C.width, i = (this.metrics.height + 2 * I) / C.height;
++    return this.ctx.save(), this.ctx.beginPath(), this.ctx.rect(B, g, E, this.metrics.height), this.ctx.clip(), this.ctx.translate(B - I + C.left * D, g - I + C.ascent * i), this.ctx.scale(D, i), this.ctx.fillText(A, 0, 0), this.ctx.restore(), !0;
 +  }
 +  adjustMetric(A, B) {
 +    if (!B)
@@ -31,7 +63,16 @@ index a4ca427b95288e70c782ce303013cd644893dcec..6c2540f78baf02f704932b819d27a711
    }
    /**
     * Remeasure font metrics (call after font loads or changes)
-@@ -2136,7 +2142,7 @@ class IA {
+@@ -1535,7 +1567,7 @@ class $ {
+     A.flags & e.FAINT && (this.ctx.globalAlpha = 0.5);
+     const w = E, s = C + this.metrics.baseline;
+     let N;
+-    if (A.grapheme_len > 0 && ((k = this.currentBuffer) != null && k.getGraphemeString) ? N = this.currentBuffer.getGraphemeString(g, B) : N = String.fromCodePoint(A.codepoint || 32), this.ctx.fillText(N, w, s), A.flags & e.FAINT && (this.ctx.globalAlpha = 1), A.flags & e.UNDERLINE) {
++    if (A.grapheme_len > 0 && ((k = this.currentBuffer) != null && k.getGraphemeString) ? N = this.currentBuffer.getGraphemeString(g, B) : N = String.fromCodePoint(A.codepoint || 32), A.grapheme_len === 0 && this.isSpriteGlyph(A.codepoint) && this.fillSpriteGlyph(N, E, C, I) || this.ctx.fillText(N, w, s), A.flags & e.FAINT && (this.ctx.globalAlpha = 1), A.flags & e.UNDERLINE) {
+       const M = C + this.metrics.baseline + 2;
+       this.ctx.strokeStyle = this.ctx.fillStyle, this.ctx.lineWidth = 1, this.ctx.beginPath(), this.ctx.moveTo(E, M), this.ctx.lineTo(E + I, M), this.ctx.stroke();
+     }
+@@ -2136,7 +2168,7 @@ class IA {
        }
      }, this.handleMouseLeave = () => {
        var g, E;
@@ -40,7 +81,7 @@ index a4ca427b95288e70c782ce303013cd644893dcec..6c2540f78baf02f704932b819d27a711
      }, this.handleClick = async (g) => {
        if (!this.canvas || !this.renderer || !this.linkDetector || !this.wasmTerm)
          return;
-@@ -2203,6 +2209,8 @@ class IA {
+@@ -2203,6 +2235,8 @@ class IA {
        scrollback: A.scrollback ?? 1e4,
        fontSize: A.fontSize ?? 15,
        fontFamily: A.fontFamily ?? "monospace",
@@ -49,7 +90,7 @@ index a4ca427b95288e70c782ce303013cd644893dcec..6c2540f78baf02f704932b819d27a711
        allowTransparency: A.allowTransparency ?? !1,
        convertEol: A.convertEol ?? !1,
        disableStdin: A.disableStdin ?? !1,
-@@ -2338,6 +2346,8 @@ class IA {
+@@ -2338,6 +2372,8 @@ class IA {
        }), this.renderer = new $(this.canvas, {
          fontSize: this.options.fontSize,
          fontFamily: this.options.fontFamily,
@@ -58,7 +99,7 @@ index a4ca427b95288e70c782ce303013cd644893dcec..6c2540f78baf02f704932b819d27a711
          cursorStyle: this.options.cursorStyle,
          cursorBlink: this.options.cursorBlink,
          theme: this.options.theme
-@@ -2712,7 +2722,7 @@ class IA {
+@@ -2712,7 +2748,7 @@ class IA {
        k = N + C;
      this.linkDetector.getLinkAt(g, k).then((h) => {
        var G, U, t, c;
