@@ -14,6 +14,11 @@ interface Transport {
   close(): void;
 }
 
+const FAILURES_BEFORE_FALLBACK = 2;
+// A proxy that buffers streams accepts the SSE request but never forwards a
+// byte. The server always sends status and sync at once, so silence is failure.
+const SSE_FIRST_MESSAGE_TIMEOUT_MS = 5_000;
+
 export class ReconnectingTransport implements Transport {
   private socket?: WebSocket;
   private events?: EventSource;
@@ -21,6 +26,7 @@ export class ReconnectingTransport implements Transport {
   private retry = 0;
   private retryTimer?: number;
   private websocketFailures = 0;
+  private sseFailures = 0;
   private cursor = 0;
   private generation = 0;
   private outbound = Promise.resolve();
@@ -50,15 +56,12 @@ export class ReconnectingTransport implements Transport {
           return;
         }
         const endpoint = message.type === "input" ? "input" : "resize";
-        await fetch(
-          `/api/session/${encodeURIComponent(this.sessionId)}/${endpoint}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(message),
-            signal: this.abortController.signal,
-          },
-        );
+        await fetch(this.sessionUrl(endpoint), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(message),
+          signal: this.abortController.signal,
+        });
       })
       .catch(() => {});
   }
@@ -77,7 +80,7 @@ export class ReconnectingTransport implements Transport {
     this.callbacks.onState("connecting");
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(
-      `${protocol}//${location.host}/api/session/${encodeURIComponent(this.sessionId)}/ws?${this.connectionQuery()}`,
+      `${protocol}//${location.host}${this.sessionUrl("ws")}?${this.connectionQuery()}`,
     );
     this.socket = socket;
     let opened = false;
@@ -95,7 +98,7 @@ export class ReconnectingTransport implements Transport {
       if (this.closed || socket !== this.socket) return;
       this.callbacks.onState("disconnected");
       if (!opened) this.websocketFailures += 1;
-      if (this.websocketFailures >= 2) this.connectSse();
+      if (this.websocketFailures >= FAILURES_BEFORE_FALLBACK) this.connectSse();
       else this.scheduleReconnect(() => this.connectWebSocket());
     });
     socket.addEventListener("error", () => socket.close());
@@ -105,20 +108,78 @@ export class ReconnectingTransport implements Transport {
     if (this.closed) return;
     this.callbacks.onState("connecting");
     const events = new EventSource(
-      `/api/session/${encodeURIComponent(this.sessionId)}/events?${this.connectionQuery()}`,
+      `${this.sessionUrl("events")}?${this.connectionQuery()}`,
     );
     this.events = events;
-    events.addEventListener("open", () => {
-      this.retry = 0;
-      this.callbacks.onState("connected");
-    });
-    events.addEventListener("message", (event) => this.deliver(event.data));
-    events.addEventListener("error", () => {
+    let received = false;
+    let silenceTimer: number | undefined;
+
+    const fail = () => {
       events.close();
+      window.clearTimeout(silenceTimer);
       if (this.closed || events !== this.events) return;
       this.callbacks.onState("disconnected");
-      this.scheduleReconnect(() => this.connectSse());
+      if (!received) this.sseFailures += 1;
+      if (this.sseFailures >= FAILURES_BEFORE_FALLBACK) this.connectLongPoll();
+      else this.scheduleReconnect(() => this.connectSse());
+    };
+
+    events.addEventListener("open", () => {
+      silenceTimer = window.setTimeout(fail, SSE_FIRST_MESSAGE_TIMEOUT_MS);
     });
+    events.addEventListener("message", (event) => {
+      if (!received) {
+        received = true;
+        window.clearTimeout(silenceTimer);
+        this.retry = 0;
+        this.sseFailures = 0;
+        this.callbacks.onState("connected");
+      }
+      this.deliver(event.data);
+    });
+    events.addEventListener("error", fail);
+  }
+
+  private connectLongPoll(): void {
+    if (this.closed) return;
+    this.callbacks.onState("connecting");
+    const generation = this.generation;
+    const signal = this.abortController.signal;
+    const isCurrent = () => !this.closed && generation === this.generation;
+
+    void (async () => {
+      let query = this.connectionQuery();
+      let connected = false;
+      try {
+        while (isCurrent()) {
+          const response = await fetch(`${this.sessionUrl("poll")}?${query}`, {
+            signal,
+          });
+          if (!response.ok) throw new Error(`Poll failed: ${response.status}`);
+          const { messages } = (await response.json()) as {
+            messages: ServerMessage[];
+          };
+          if (!isCurrent()) return;
+          if (!connected) {
+            connected = true;
+            this.retry = 0;
+            this.callbacks.onState("connected");
+          }
+          for (const message of messages) this.accept(message);
+          query = new URLSearchParams({
+            cursor: String(this.cursor),
+          }).toString();
+        }
+      } catch {
+        if (!isCurrent()) return;
+        this.callbacks.onState("disconnected");
+        this.scheduleReconnect(() => this.connectLongPoll());
+      }
+    })();
+  }
+
+  private sessionUrl(endpoint: string): string {
+    return `/api/session/${encodeURIComponent(this.sessionId)}/${endpoint}`;
   }
 
   private connectionQuery(): string {
@@ -133,12 +194,15 @@ export class ReconnectingTransport implements Transport {
 
   private deliver(raw: string): void {
     try {
-      const message = JSON.parse(raw) as ServerMessage;
-      if (message.type === "output" || message.type === "sync") {
-        this.cursor = message.cursor;
-      }
-      this.callbacks.onMessage(message);
+      this.accept(JSON.parse(raw) as ServerMessage);
     } catch {}
+  }
+
+  private accept(message: ServerMessage): void {
+    if (message.type === "output" || message.type === "sync") {
+      this.cursor = message.cursor;
+    }
+    this.callbacks.onMessage(message);
   }
 
   private scheduleReconnect(connect: () => void): void {

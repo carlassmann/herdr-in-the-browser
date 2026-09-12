@@ -103,7 +103,7 @@ cloudflared tunnel ingress validate
 cloudflared tunnel run herdr-terminal
 ```
 
-Cloudflare Tunnel supports WebSockets without an application change. Use a named tunnel rather than a Quick Tunnel: Cloudflare documents that Quick Tunnels do not support SSE, which this app uses as its fallback. See Cloudflare's [locally-managed tunnel guide](https://developers.cloudflare.com/tunnel/advanced/local-management/create-local-tunnel/), [configuration reference](https://developers.cloudflare.com/tunnel/advanced/local-management/configuration-file/), and [Tunnel FAQ](https://developers.cloudflare.com/cloudflare-one/faq/cloudflare-tunnels-faq/).
+Cloudflare Tunnel supports WebSockets without an application change. When a network blocks WebSockets, the client falls back to SSE, and when SSE stalls too, to long polling. Cloudflare documents that Quick Tunnels do not support SSE, so on a Quick Tunnel the second fallback is the one that carries traffic. Prefer a named tunnel: it supports every transport and is the only kind you can put behind Cloudflare Access. See Cloudflare's [locally-managed tunnel guide](https://developers.cloudflare.com/tunnel/advanced/local-management/create-local-tunnel/), [configuration reference](https://developers.cloudflare.com/tunnel/advanced/local-management/configuration-file/), and [Tunnel FAQ](https://developers.cloudflare.com/cloudflare-one/faq/cloudflare-tunnels-faq/).
 
 ### Cloudflare Access
 
@@ -119,6 +119,7 @@ Do not add an Access bypass policy. This application intentionally has no accoun
 - `POST /api/sessions` with `{ "name": "work", "mode": "create" | "attach" }`
 - `GET /api/session/:id/ws`
 - `GET /api/session/:id/events`
+- `GET /api/session/:id/poll`
 - `POST /api/session/:id/input`
 - `POST /api/session/:id/resize`
 
@@ -131,5 +132,5 @@ WebSocket client messages are `input` or `resize`; server messages are `output` 
 - If two browsers attach to one web session, both can send input and the latest resize wins.
 - Herdr's own session history/state survives app-server restarts; the browser terminal's prior scrollback does not.
 - iOS may suspend network activity in the background. Herdr continues; output resumes after reconnection.
-- The fallback is SSE plus `POST`; long polling is not implemented.
+- Fallback transports send input over `POST` and receive output over SSE or long polling. Once the client has fallen back it stays there until the page reloads.
 - Ghostty settings without a browser-renderer equivalent, including custom shaders and macOS font thickening, are ignored.

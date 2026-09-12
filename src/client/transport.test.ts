@@ -61,6 +61,11 @@ class FakeEventSource extends FakeEventTarget {
   close(): void {}
 }
 
+function failWebSocketTwice(): void {
+  FakeWebSocket.opened[0]!.emit("close");
+  FakeWebSocket.opened[1]!.emit("close");
+}
+
 function useFakeConnections(): void {
   Object.defineProperty(globalThis, "location", {
     value: { protocol: "http:", host: "localhost:8787" },
@@ -199,5 +204,99 @@ describe("reconnection", () => {
     );
     expect(states.at(-1)).toBe("connecting");
     transport.close();
+  });
+});
+
+describe("long-poll fallback", () => {
+  test("polls after two SSE attempts end without a message", async () => {
+    useFakeConnections();
+    const polled: string[] = [];
+    const states: string[] = [];
+    const received: string[] = [];
+    let resolveSecondPoll = () => {};
+    const secondPoll = new Promise<void>((resolve) => {
+      resolveSecondPoll = resolve;
+    });
+    globalThis.fetch = ((url) => {
+      polled.push(String(url));
+      if (polled.length === 1) {
+        return Promise.resolve(
+          Response.json({
+            messages: [
+              { type: "status", running: true },
+              { type: "sync", cursor: 0, reset: false },
+              { type: "output", data: "hi", cursor: 7 },
+            ],
+          }),
+        );
+      }
+      resolveSecondPoll();
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+    const transport = new ReconnectingTransport("demo", {
+      onMessage: (message) => received.push(message.type),
+      onState: (state) => states.push(state),
+      getSize: () => ({ cols: 100, rows: 30 }),
+    });
+
+    transport.connect();
+    failWebSocketTwice();
+    FakeEventSource.opened[0]!.emit("error");
+    FakeEventSource.opened[1]!.emit("error");
+    await secondPoll;
+
+    expect(FakeEventSource.opened).toHaveLength(2);
+    expect(polled).toEqual([
+      "/api/session/demo/poll?cursor=0&cols=100&rows=30",
+      "/api/session/demo/poll?cursor=7",
+    ]);
+    expect(received).toEqual(["status", "sync", "output"]);
+    expect(states.at(-1)).toBe("connected");
+    transport.close();
+  });
+
+  test("treats a silent SSE stream as a failed attempt", () => {
+    useFakeConnections();
+    const transport = new ReconnectingTransport("demo", {
+      onMessage() {},
+      onState() {},
+    });
+
+    transport.connect();
+    failWebSocketTwice();
+    FakeEventSource.opened[0]!.emit("open");
+
+    expect(FakeEventSource.opened).toHaveLength(2);
+    transport.close();
+  });
+
+  test("stops polling once closed", async () => {
+    useFakeConnections();
+    let polls = 0;
+    let firstPollFinished = () => {};
+    const firstPoll = new Promise<void>((resolve) => {
+      firstPollFinished = resolve;
+    });
+    globalThis.fetch = ((_: RequestInfo | URL) => {
+      polls += 1;
+      firstPollFinished();
+      return Promise.resolve(Response.json({ messages: [] }));
+    }) as typeof fetch;
+    const transport = new ReconnectingTransport("demo", {
+      onMessage() {},
+      onState() {},
+    });
+
+    transport.connect();
+    failWebSocketTwice();
+    FakeEventSource.opened[0]!.emit("error");
+    FakeEventSource.opened[1]!.emit("error");
+    await firstPoll;
+    transport.close();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const pollsAfterClose = polls;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(polls).toBe(pollsAfterClose);
   });
 });

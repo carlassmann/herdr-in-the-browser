@@ -8,6 +8,7 @@ import type {
 import homepage from "../client/index.html";
 import { loadGhosttyAppearance, loadGhosttyFont } from "./ghostty-config";
 import { isTrustedRequest, parsePublicHosts } from "./request-origin";
+import { collectMessages } from "./long-poll";
 import { isClientMessage } from "./session";
 import { SessionManager } from "./session-manager";
 
@@ -16,6 +17,8 @@ const port = Number(process.env.PORT ?? 8787);
 const development = process.env.NODE_ENV !== "production";
 const publicDirectory = join(process.cwd(), "public");
 const publicHosts = parsePublicHosts(process.env.PUBLIC_HOSTS);
+// Well under Cloudflare's 100 s proxy read timeout.
+const longPollTimeoutMs = 25_000;
 const sessions = new SessionManager();
 
 interface SocketData {
@@ -150,6 +153,21 @@ const server = Bun.serve<SocketData>({
         });
       }),
     },
+    "/api/session/:id/poll": {
+      GET: guard(async (request: BunRequest<"/api/session/:id/poll">) => {
+        const session = sessions.get(request.params.id);
+        if (!session) return json({ error: "Session not found." }, 404);
+
+        const size = readSize(request);
+        if (size) session.receive({ type: "resize", ...size });
+
+        const messages = await collectMessages(session, readCursor(request), {
+          timeoutMs: longPollTimeoutMs,
+          signal: request.signal,
+        });
+        return json({ messages });
+      }),
+    },
     "/api/session/:id/input": {
       POST: guard((request: BunRequest<"/api/session/:id/input">) =>
         receiveSessionMessage(request, "input"),
@@ -280,6 +298,17 @@ async function readJson(request: Request): Promise<unknown> {
 function readCursor(request: Request): number {
   const value = Number(new URL(request.url).searchParams.get("cursor") ?? 0);
   return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function readSize(
+  request: Request,
+): { cols: number; rows: number } | undefined {
+  const params = new URL(request.url).searchParams;
+  if (!params.has("cols") || !params.has("rows")) return undefined;
+  return {
+    cols: readDimension(request, "cols", 80, 2, 500),
+    rows: readDimension(request, "rows", 24, 1, 300),
+  };
 }
 
 function readDimension(
