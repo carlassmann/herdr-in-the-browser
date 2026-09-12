@@ -2,22 +2,36 @@
 @import "@fontsource-variable/geist-mono/index.css";
 
 :root {
-  color-scheme: dark;
-  font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
-  font-synthesis: none;
-  color: #e4e4e7;
-  background: #09090b;
-  -webkit-font-smoothing: antialiased;
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-right: env(safe-area-inset-right, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --safe-left: env(safe-area-inset-left, 0px);
+  --ui-background: #09090b;
+  --ui-foreground: #e4e4e7;
+  --ui-muted: #a1a1aa;
+  --ui-surface: #18181b;
+  --ui-surface-strong: #27272a;
+  --ui-border: rgb(255 255 255 / 13%);
+  --ui-border-soft: rgb(255 255 255 / 8%);
+  --ui-accent: #34d399;
+  --ui-accent-strong: #34d399;
+  --ui-accent-foreground: #052e25;
+  --ui-warning: #fbbf24;
+  --ui-danger: #be123c;
+  --ui-danger-foreground: #fff1f2;
+  --ui-focus: #34d399;
   --terminal-background: #09090b;
   --terminal-foreground: #e4e4e7;
   --terminal-padding-top: 2px;
   --terminal-padding-right: 2px;
   --terminal-padding-bottom: 2px;
   --terminal-padding-left: 2px;
+  color-scheme: dark;
+  font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  font-synthesis: none;
+  color: var(--ui-foreground);
+  background: var(--ui-background);
+  -webkit-font-smoothing: antialiased;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
 }
 
 * {
@@ -33,7 +47,7 @@ body,
 }
 body {
   overscroll-behavior: none;
-  background: #09090b;
+  background: var(--ui-background);
 }
 button,
 input {
@@ -70,8 +84,8 @@ button {
   width: 2.5rem;
   height: 2.5rem;
   border-radius: 0.625rem;
-  background: #10b981;
-  color: #052e25;
+  background: var(--ui-accent);
+  color: var(--ui-accent-foreground);
   font:
     600 1.125rem/1 "Geist Mono Variable",
     monospace;
@@ -82,7 +96,7 @@ p {
   margin: 0;
 }
 h1 {
-  color: #fafafa;
+  color: var(--ui-foreground);
   font-size: 1.25rem;
   font-weight: 600;
   letter-spacing: -0.02em;
@@ -90,7 +104,7 @@ h1 {
 .brand-header p {
   max-width: 34ch;
   padding-top: 0.25rem;
-  color: #a1a1aa;
+  color: var(--ui-muted);
   font-size: 1rem;
   line-height: 1.5;
   text-wrap: pretty;
@@ -102,7 +116,7 @@ h1 {
 .session-list-header h2 {
   display: block;
   padding-bottom: 0.625rem;
-  color: #d4d4d8;
+  color: var(--ui-foreground);
   font-size: 0.875rem;
   font-weight: 500;
 }
@@ -115,20 +129,20 @@ h1 {
   min-width: 0;
   flex: 1;
   height: 2.75rem;
-  border: 1px solid #3f3f46;
+  border: 1px solid var(--ui-border);
   border-radius: 0.5rem;
   outline: none;
-  background: #18181b;
+  background: var(--ui-surface);
   padding: 0 0.75rem;
-  color: #fafafa;
+  color: var(--ui-foreground);
   font-size: 1rem;
 }
 .new-session input::placeholder {
-  color: #71717a;
+  color: var(--ui-muted);
 }
 .new-session input:focus-visible {
-  border-color: #10b981;
-  outline: 2px solid rgb(16 185 129 / 25%);
+  border-color: var(--ui-accent);
+  outline: 2px solid color-mix(in srgb, var(--ui-accent) 30%, transparent);
   outline-offset: 0;
 }
 .primary-button {
@@ -138,9 +152,9 @@ h1 {
   gap: 0.375rem;
   border: 0;
   border-radius: 0.5rem;
-  background: #10b981;
+  background: var(--ui-accent);
   padding: 0 0.875rem 0 0.625rem;
-  color: #052e25;
+  color: var(--ui-accent-foreground);
   font-size: 0.875rem;
   font-weight: 600;
 }
@@ -157,26 +171,26 @@ h1 {
 .icon-button:focus-visible,
 .key:focus-visible,
 .dialog-button:focus-visible {
-  outline: 2px solid #34d399;
+  outline: 2px solid var(--ui-focus);
   outline-offset: 2px;
 }
 .form-error {
   padding-top: 0.5rem;
-  color: #fda4af;
+  color: var(--ui-danger);
   font-size: 0.875rem;
 }
 .session-list-header {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  border-bottom: 1px solid rgb(255 255 255 / 10%);
+  border-bottom: 1px solid var(--ui-border-soft);
 }
 .text-button {
   min-height: 2.75rem;
   border: 0;
   background: transparent;
   padding: 0.5rem 0;
-  color: #6ee7b7;
+  color: var(--ui-accent-strong);
   font-size: 0.875rem;
 }
 .session-list {
@@ -185,7 +199,7 @@ h1 {
   list-style: none;
 }
 .session-list li + li {
-  border-top: 1px solid rgb(255 255 255 / 7%);
+  border-top: 1px solid var(--ui-border-soft);
 }
 .session-row {
   display: flex;
@@ -201,12 +215,12 @@ h1 {
   text-align: left;
 }
 .session-row:active {
-  background: rgb(255 255 255 / 4%);
+  background: color-mix(in srgb, var(--ui-foreground) 6%, transparent);
 }
 .session-name {
   min-width: 0;
   overflow: hidden;
-  color: #f4f4f5;
+  color: var(--ui-foreground);
   font-family: "Geist Mono Variable", monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -217,7 +231,7 @@ h1 {
   flex: 0 0 auto;
   align-items: center;
   gap: 0.375rem;
-  color: #a1a1aa;
+  color: var(--ui-muted);
   font-size: 0.8125rem;
 }
 .status-dot,
@@ -226,22 +240,22 @@ h1 {
   height: 0.4375rem;
   flex: 0 0 auto;
   border-radius: 999px;
-  background: #71717a;
+  background: var(--ui-muted);
 }
 .status-running,
 .connection-connected > span {
-  background: #34d399;
+  background: var(--ui-accent-strong);
 }
 .status-stopped,
 .connection-disconnected > span {
-  background: #fb7185;
+  background: var(--ui-danger);
 }
 .connection-connecting > span {
-  background: #fbbf24;
+  background: var(--ui-warning);
 }
 .empty-state {
   padding: 2rem 0;
-  color: #71717a;
+  color: var(--ui-muted);
   font-size: 1rem;
   text-align: center;
 }
@@ -273,7 +287,7 @@ h1 {
   border: 0;
   border-radius: 0.375rem;
   background: transparent;
-  color: #a1a1aa;
+  color: var(--ui-muted);
 }
 .session-title {
   min-width: 0;
@@ -298,6 +312,7 @@ h1 {
   overflow: hidden;
   opacity: 0;
   background: var(--terminal-background);
+  transition: opacity 120ms ease-out;
 }
 .terminal-shell[data-ready="true"] {
   opacity: 1;
@@ -316,6 +331,9 @@ h1 {
 .terminal-canvas canvas {
   max-width: 100%;
 }
+.terminal-canvas textarea {
+  font-size: 16px;
+}
 .keys-trigger {
   display: inline-flex;
   height: 2.75rem;
@@ -323,9 +341,9 @@ h1 {
   gap: 0.375rem;
   border: 0;
   border-radius: 0.375rem;
-  background: #27272a;
+  background: var(--ui-surface-strong);
   padding: 0 0.625rem 0 0.5rem;
-  color: #d4d4d8;
+  color: var(--ui-foreground);
   font-size: 0.8125rem;
 }
 .keys-trigger svg {
@@ -334,7 +352,7 @@ h1 {
   flex: 0 0 auto;
 }
 .keys-trigger:focus-visible {
-  outline: 2px solid #34d399;
+  outline: 2px solid var(--ui-focus);
   outline-offset: 2px;
 }
 .keys-positioner {
@@ -343,9 +361,9 @@ h1 {
 .keys-popup {
   width: min(20rem, calc(100vw - 1rem));
   border-radius: 0.625rem;
-  background: #18181b;
+  background: var(--ui-surface);
   padding: 0.5rem;
-  box-shadow: 0 0 0 1px rgb(255 255 255 / 12%);
+  box-shadow: 0 0 0 1px var(--ui-border);
   transform-origin: var(--transform-origin);
   transition:
     opacity 100ms ease-out,
@@ -365,20 +383,20 @@ h1 {
   position: relative;
   min-width: 0;
   height: 2.75rem;
-  border: 1px solid rgb(255 255 255 / 12%);
+  border: 1px solid var(--ui-border);
   border-radius: 0.4375rem;
-  background: #27272a;
+  background: var(--ui-surface-strong);
   padding: 0 0.625rem;
-  color: #e4e4e7;
+  color: var(--ui-foreground);
   font:
     500 0.8125rem/1 "Geist Mono Variable",
     monospace;
 }
 .key:active,
 .key[aria-pressed="true"] {
-  border-color: #34d399;
-  background: #064e3b;
-  color: #d1fae5;
+  border-color: var(--ui-accent-strong);
+  background: color-mix(in srgb, var(--ui-accent) 28%, var(--ui-background));
+  color: var(--ui-foreground);
 }
 
 .dialog-backdrop {
@@ -400,11 +418,11 @@ h1 {
   left: 50%;
   width: min(22rem, calc(100vw - 2rem));
   border-radius: 0.75rem;
-  background: #18181b;
+  background: var(--ui-surface);
   padding: 1rem;
-  color: #f4f4f5;
+  color: var(--ui-foreground);
   box-shadow:
-    0 0 0 1px rgb(255 255 255 / 12%),
+    0 0 0 1px var(--ui-border),
     0 1rem 3rem rgb(0 0 0 / 45%);
   transform: translate(-50%, -50%);
   transition:
@@ -422,13 +440,13 @@ h1 {
 }
 .dialog-description {
   padding-top: 0.375rem;
-  color: #a1a1aa;
+  color: var(--ui-muted);
   font-size: 0.875rem;
   line-height: 1.4;
 }
 .dialog-error {
   padding-top: 0.75rem;
-  color: #fda4af;
+  color: var(--ui-danger);
   font-size: 0.875rem;
 }
 .dialog-actions {
@@ -441,15 +459,15 @@ h1 {
   min-height: 2.75rem;
   border: 0;
   border-radius: 0.5rem;
-  background: #27272a;
+  background: var(--ui-surface-strong);
   padding: 0 0.875rem;
-  color: #e4e4e7;
+  color: var(--ui-foreground);
   font-size: 0.875rem;
   font-weight: 500;
 }
 .dialog-button-danger {
-  background: #be123c;
-  color: #fff1f2;
+  background: var(--ui-danger);
+  color: var(--ui-danger-foreground);
 }
 .dialog-button:disabled {
   opacity: 0.5;
@@ -459,15 +477,19 @@ h1 {
   .session-row:hover,
   .icon-button:hover,
   .text-button:hover {
-    background: rgb(255 255 255 / 5%);
+    background: color-mix(in srgb, var(--ui-foreground) 6%, transparent);
   }
   .primary-button:not(:disabled):hover {
-    background: #34d399;
+    background: var(--ui-accent-strong);
   }
   .keys-trigger:hover,
   .key:hover,
   .dialog-button:hover {
-    background: #3f3f46;
+    background: color-mix(
+      in srgb,
+      var(--ui-foreground) 16%,
+      var(--ui-background)
+    );
   }
 }
 

@@ -1,4 +1,5 @@
 import type { SessionMode, SessionSummary } from "../shared/protocol";
+import { findHerdr, herdrCommand } from "./herdr";
 import { TerminalSession } from "./session";
 import { VALID_SESSION_NAME, validateSessionName } from "./session-name";
 
@@ -25,9 +26,9 @@ export class SessionManager {
     session?.stop();
     this.sessions.delete(name);
 
-    const herdrExecutable = process.env.HERDR_BIN ?? Bun.which("herdr");
-    if (!herdrExecutable) throw new Error("herdr was not found on PATH.");
-    const child = Bun.spawn([herdrExecutable, "session", "stop", name], {
+    if (!findHerdr()) throw new Error("herdr was not found on PATH.");
+    const [file, ...args] = herdrCommand(["session", "stop", name]);
+    const child = Bun.spawn([file!, ...args], {
       stdout: "ignore",
       stderr: "pipe",
     });
@@ -57,9 +58,9 @@ export class SessionManager {
 }
 
 async function listHerdrSessions(): Promise<SessionSummary[]> {
-  const herdrExecutable = process.env.HERDR_BIN ?? Bun.which("herdr");
-  if (!herdrExecutable) return [];
-  const child = Bun.spawn([herdrExecutable, "session", "list"], {
+  if (!findHerdr()) return [];
+  const [file, ...args] = herdrCommand(["session", "list"]);
+  const child = Bun.spawn([file!, ...args], {
     stdout: "pipe",
     stderr: "ignore",
   });

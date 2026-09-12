@@ -6,6 +6,7 @@ interface TransportCallbacks {
   onMessage(message: ServerMessage): void;
   onState(state: TransportState): void;
   onFreshConnection(): void;
+  getSize?(): { cols: number; rows: number };
 }
 
 interface Transport {
@@ -76,7 +77,7 @@ export class ReconnectingTransport implements Transport {
     this.callbacks.onState("connecting");
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(
-      `${protocol}//${location.host}/api/session/${encodeURIComponent(this.sessionId)}/ws?cursor=${this.cursor}`,
+      `${protocol}//${location.host}/api/session/${encodeURIComponent(this.sessionId)}/ws?${this.connectionQuery()}`,
     );
     this.socket = socket;
     let opened = false;
@@ -105,7 +106,7 @@ export class ReconnectingTransport implements Transport {
     if (this.closed) return;
     this.callbacks.onState("connecting");
     const events = new EventSource(
-      `/api/session/${encodeURIComponent(this.sessionId)}/events?cursor=${this.cursor}`,
+      `/api/session/${encodeURIComponent(this.sessionId)}/events?${this.connectionQuery()}`,
     );
     this.events = events;
     events.addEventListener("open", () => {
@@ -120,6 +121,16 @@ export class ReconnectingTransport implements Transport {
       this.callbacks.onState("disconnected");
       this.scheduleReconnect(() => this.connectSse());
     });
+  }
+
+  private connectionQuery(): string {
+    const params = new URLSearchParams({ cursor: String(this.cursor) });
+    const size = this.callbacks.getSize?.();
+    if (size) {
+      params.set("cols", String(size.cols));
+      params.set("rows", String(size.rows));
+    }
+    return params.toString();
   }
 
   private deliver(raw: string): void {

@@ -2,6 +2,11 @@ import { AlertDialog } from "@base-ui/react/alert-dialog";
 import { ArrowLeftIcon, PlusIcon, StopIcon } from "@heroicons/react/16/solid";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SessionMode, SessionSummary } from "../shared/protocol";
+import {
+  applyAppearance,
+  loadAppearance,
+  watchSystemAppearance,
+} from "./appearance";
 import { MobileToolbar } from "./MobileToolbar";
 import { TerminalControlsProvider } from "./TerminalControls";
 import { TerminalView } from "./TerminalView";
@@ -42,6 +47,22 @@ export function App() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    let dispose = () => {};
+    let cancelled = false;
+    void loadAppearance().then((appearance) => {
+      if (cancelled) return;
+      applyAppearance(appearance);
+      if (appearance.colorScheme === "system") {
+        dispose = watchSystemAppearance(() => applyAppearance(appearance));
+      }
+    });
+    return () => {
+      cancelled = true;
+      dispose();
+    };
+  }, []);
 
   useEffect(() => {
     if (!activeSession || loading) return;
@@ -160,7 +181,8 @@ export function App() {
                     Stop {activeSession}?
                   </AlertDialog.Title>
                   <AlertDialog.Description className="dialog-description">
-                    Running work in this terminal will end.
+                    Running work will end. The named session stays available to
+                    restart.
                   </AlertDialog.Description>
                   {error ? (
                     <p className="dialog-error" role="alert">

@@ -1,21 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { FitAddon, init, Terminal } from "ghostty-web";
-import type { TerminalAppearance, TerminalTheme } from "../shared/protocol";
+import type { TerminalAppearance } from "../shared/protocol";
+import {
+  applyAppearance,
+  loadAppearance,
+  resolveAppearance,
+  watchSystemAppearance,
+} from "./appearance";
 import { encodeModifiedInput } from "./keyboard";
 import { encodeTerminalMouse } from "./terminal-mouse";
 import { useTerminalControls } from "./TerminalControls";
 import { ReconnectingTransport, type TransportState } from "./transport";
 
 const ghosttyReady = init();
-const fallbackAppearance: TerminalAppearance = {
-  fontFamily: "Geist Mono Variable",
-  fontSize: 15,
-  padding: { top: 2, right: 2, bottom: 2, left: 2 },
-  colorScheme: "system",
-  cursorBlink: true,
-  cursorStyle: "block",
-  theme: { background: "#09090b", foreground: "#e4e4e7", cursor: "#34d399" },
-};
 
 interface TerminalViewProps {
   sessionId: string;
@@ -31,6 +28,7 @@ export function TerminalView({
   const transportRef = useRef<ReconnectingTransport | undefined>(undefined);
   const modifiersRef = useRef({ control: false, alt: false });
   const [ready, setReady] = useState(false);
+  const [appearanceVersion, setAppearanceVersion] = useState(0);
   const { modifiers, setModifiers, registerInputHandler } =
     useTerminalControls();
 
@@ -50,7 +48,6 @@ export function TerminalView({
 
   useEffect(() => {
     let disposed = false;
-    const abortController = new AbortController();
     const disposals: Array<() => void> = [];
     const disposeWithEffect = (dispose: () => void) => {
       if (disposed) dispose();
@@ -61,13 +58,13 @@ export function TerminalView({
     void (async () => {
       const [, appearance] = await Promise.all([
         ghosttyReady,
-        fetchAppearance(abortController.signal),
+        loadAppearance(),
       ]);
       if (disposed || !containerRef.current) return;
       const fontFamily = await loadConfiguredFont(appearance);
       if (disposed || !containerRef.current) return;
-      const terminalTheme = resolveTerminalTheme(appearance);
-      applyAppearanceVariables(appearance, terminalTheme);
+      applyAppearance(appearance);
+      const { theme } = resolveAppearance(appearance);
 
       const terminal = new Terminal({
         cursorBlink: appearance.cursorBlink,
@@ -77,7 +74,7 @@ export function TerminalView({
         cellWidthAdjustment: appearance.cellWidthAdjustment,
         cellHeightAdjustment: appearance.cellHeightAdjustment,
         scrollback: 5000,
-        theme: terminalTheme,
+        theme,
       });
       disposeWithEffect(() => terminal.dispose());
       const fitAddon = new FitAddon();
@@ -86,9 +83,17 @@ export function TerminalView({
       await terminal.open(containerRef.current);
       if (disposed) return;
       terminalRef.current = terminal;
-      disposeWithEffect(watchSystemAppearance(appearance, terminal));
+      if (appearance.colorScheme === "system") {
+        disposeWithEffect(
+          watchSystemAppearance(() => {
+            applyAppearance(appearance);
+            setAppearanceVersion((version) => version + 1);
+          }),
+        );
+      }
 
       const transport = new ReconnectingTransport(sessionId, {
+        getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
         onMessage(message) {
           if (message.type === "output") terminal?.write(message.data);
           else if (message.type === "sync") {
@@ -150,14 +155,13 @@ export function TerminalView({
 
     return () => {
       disposed = true;
-      abortController.abort();
       window.removeEventListener("online", reconnect);
       document.removeEventListener("visibilitychange", reconnectWhenVisible);
       while (disposals.length) disposals.pop()?.();
       transportRef.current = undefined;
       terminalRef.current = undefined;
     };
-  }, [sessionId, onConnectionChange, setModifiers]);
+  }, [sessionId, onConnectionChange, setModifiers, appearanceVersion]);
 
   return (
     <div
@@ -284,18 +288,6 @@ function attachMouseReporting(
   };
 }
 
-async function fetchAppearance(
-  signal: AbortSignal,
-): Promise<TerminalAppearance> {
-  try {
-    const response = await fetch("/api/appearance", { signal });
-    if (!response.ok) return fallbackAppearance;
-    return (await response.json()) as TerminalAppearance;
-  } catch {
-    return fallbackAppearance;
-  }
-}
-
 async function loadConfiguredFont(
   appearance: TerminalAppearance,
 ): Promise<string> {
@@ -329,45 +321,4 @@ async function loadConfiguredFont(
   } catch {
     return `"${configuredFamily}", "Geist Mono Variable", ui-monospace, monospace`;
   }
-}
-
-function resolveTerminalTheme(appearance: TerminalAppearance): TerminalTheme {
-  const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-  const useDark =
-    appearance.colorScheme === "dark" ||
-    (appearance.colorScheme === "system" && prefersDark);
-  return (
-    (useDark ? appearance.darkTheme : appearance.lightTheme) ?? appearance.theme
-  );
-}
-
-function applyAppearanceVariables(
-  appearance: TerminalAppearance,
-  theme: TerminalTheme,
-) {
-  const root = document.documentElement.style;
-  root.setProperty("--terminal-background", theme.background);
-  root.setProperty("--terminal-foreground", theme.foreground);
-  root.setProperty("--terminal-padding-top", `${appearance.padding.top}px`);
-  root.setProperty("--terminal-padding-right", `${appearance.padding.right}px`);
-  root.setProperty(
-    "--terminal-padding-bottom",
-    `${appearance.padding.bottom}px`,
-  );
-  root.setProperty("--terminal-padding-left", `${appearance.padding.left}px`);
-}
-
-function watchSystemAppearance(
-  appearance: TerminalAppearance,
-  terminal: Terminal,
-): () => void {
-  if (appearance.colorScheme !== "system") return () => {};
-  const media = window.matchMedia("(prefers-color-scheme: dark)");
-  const update = () => {
-    const theme = resolveTerminalTheme(appearance);
-    terminal.options.theme = theme;
-    applyAppearanceVariables(appearance, theme);
-  };
-  media.addEventListener("change", update);
-  return () => media.removeEventListener("change", update);
 }

@@ -19,6 +19,8 @@ const sessions = new SessionManager();
 interface SocketData {
   sessionName: string;
   cursor: number;
+  cols: number;
+  rows: number;
   unsubscribe?: () => void;
 }
 
@@ -92,7 +94,17 @@ const server = Bun.serve<SocketData>({
         if (request.headers.get("upgrade")?.toLowerCase() !== "websocket")
           return json({ error: "WebSocket upgrade required." }, 426);
         const cursor = readCursor(request);
-        if (server.upgrade(request, { data: { sessionName, cursor } })) return;
+        if (
+          server.upgrade(request, {
+            data: {
+              sessionName,
+              cursor,
+              cols: readDimension(request, "cols", 80, 2, 500),
+              rows: readDimension(request, "rows", 24, 1, 300),
+            },
+          })
+        )
+          return;
         return json({ error: "WebSocket upgrade failed." }, 400);
       }),
     },
@@ -100,6 +112,12 @@ const server = Bun.serve<SocketData>({
       GET: guard(function (request: BunRequest<"/api/session/:id/events">) {
         const session = sessions.get(request.params.id);
         if (!session) return json({ error: "Session not found." }, 404);
+
+        session.receive({
+          type: "resize",
+          cols: readDimension(request, "cols", 80, 2, 500),
+          rows: readDimension(request, "rows", 24, 1, 300),
+        });
 
         let unsubscribe = () => {};
         let keepAlive: ReturnType<typeof setInterval> | undefined;
@@ -167,6 +185,11 @@ const server = Bun.serve<SocketData>({
     open(socket) {
       const session = sessions.get(socket.data.sessionName);
       if (!session) return socket.close(1008, "Session not found");
+      session.receive({
+        type: "resize",
+        cols: socket.data.cols,
+        rows: socket.data.rows,
+      });
       socket.data.unsubscribe = session.subscribe(
         (message) => socket.send(JSON.stringify(message)),
         socket.data.cursor,
@@ -241,6 +264,20 @@ async function receiveSessionMessage(
 function readCursor(request: Request): number {
   const value = Number(new URL(request.url).searchParams.get("cursor") ?? 0);
   return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function readDimension(
+  request: Request,
+  name: string,
+  fallbackValue: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const raw = new URL(request.url).searchParams.get(name);
+  if (raw === null) return fallbackValue;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) return fallbackValue;
+  return Math.min(maximum, Math.max(minimum, Math.floor(value)));
 }
 
 function isSameOrigin(request: Request): boolean {

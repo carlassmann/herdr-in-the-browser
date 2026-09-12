@@ -5,6 +5,7 @@ import type {
   SessionMode,
   SessionSummary,
 } from "../shared/protocol";
+import { herdrCommand } from "./herdr";
 
 const MAX_REPLAY_BYTES = 1024 * 1024;
 
@@ -64,22 +65,16 @@ export class TerminalSession {
     const args =
       mode === "attach" ? ["session", "attach", name] : ["--session", name];
 
-    const herdrExecutable = process.env.HERDR_BIN ?? Bun.which("herdr");
-    if (!herdrExecutable)
-      throw new Error(
-        "herdr was not found on PATH. Set HERDR_BIN to its absolute path.",
-      );
+    const [file, ...command] = herdrCommand(args, {
+      COLORTERM: "truecolor",
+      TERM_PROGRAM: "HerdrWeb",
+    });
 
-    this.process = spawn(herdrExecutable, args, {
+    this.process = spawn(file!, command, {
       name: "xterm-256color",
       cols: 80,
       rows: 24,
       cwd: process.cwd(),
-      env: {
-        ...process.env,
-        COLORTERM: "truecolor",
-        TERM_PROGRAM: "HerdrWeb",
-      },
     });
 
     this.process.onData((data) => {
