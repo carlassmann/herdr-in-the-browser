@@ -253,6 +253,9 @@ h1 {
 .connection-connecting > span {
   background: var(--ui-warning);
 }
+.connection-exited > span {
+  background: var(--ui-muted);
+}
 .empty-state {
   padding: 2rem 0;
   color: var(--ui-muted);
@@ -327,12 +330,14 @@ h1 {
     max(var(--terminal-padding-bottom), var(--safe-bottom))
     max(var(--terminal-padding-left), var(--safe-left));
   touch-action: none;
+  cursor: default;
 }
 .terminal-canvas canvas {
   max-width: 100%;
 }
 .terminal-canvas textarea {
   font-size: 16px;
+  caret-color: transparent;
 }
 .keys-trigger {
   display: inline-flex;

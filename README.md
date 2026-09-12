@@ -1,5 +1,7 @@
 # Herdr Web Terminal
 
+![Herdr Terminal on iPhone](./docs/herdr-terminal-usage.gif)
+
 A small, self-hosted web terminal for Herdr. The Bun server binds only to `127.0.0.1`, owns Bun-native PTYs, and serves a React PWA rendered by `ghostty-web`/libghostty WASM.
 
 ## Local development
@@ -39,15 +41,15 @@ The start screen lists Herdr's named sessions. You can:
 - select an existing name to run `herdr session attach <name>`;
 - use the back button to switch terminals without stopping the prior PTY.
 
-The Bun process keeps each opened PTY alive when Safari disconnects. It retains the latest 1 MiB of raw PTY output and replays it when the browser reconnects. ANSI data is forwarded as arbitrary chunks and is never parsed by the server.
+The Bun process keeps each opened PTY alive when Safari disconnects. It retains the latest 1 MiB of raw PTY output and replays it when the browser reconnects. ANSI data is forwarded as arbitrary chunks; the server only watches for DEC private mode switches (mouse reporting, alternate screen, bracketed paste, cursor visibility) so it can restore them before a replay that no longer starts at the beginning of the stream.
 
-Herdr normally refuses to run nested inside another Herdr pane. The server clears Herdr's nesting markers for every session it spawns, so it works whether it is launched from a plain shell or from inside Herdr.
+Herdr normally refuses to run nested inside another Herdr pane. The server strips Herdr's nesting markers from the environment of every process it spawns, so it works whether it is launched from a plain shell or from inside Herdr.
 
-The server reads Ghostty's effective local configuration with `ghostty +show-config`. The terminal applies its regular and bold font faces, font size, cell width/height adjustments, window padding, cursor style/blink behavior, foreground/background, selection colors, and first 16 ANSI palette colors. Paired `light:…,dark:…` themes follow `window-theme`; `system` follows the browser device's appearance. The app chrome (start screen, header, controls, dialogs) derives its colors from the same resolved theme and switches with it, so the interface stays consistent in light and dark. If the configured font is installed as an OTF, TTF, WOFF, or WOFF2 file in a standard macOS font directory, the server makes it available to the authenticated browser. Set `GHOSTTY_BIN` if the Ghostty executable is installed in a nonstandard location.
+The server reads Ghostty's effective local configuration with `ghostty +show-config`. The terminal applies its regular and bold font faces, font size, cell width/height adjustments, window padding, cursor style/blink behavior, foreground/background, selection colors, and first 16 ANSI palette colors. Paired `light:…,dark:…` themes follow `window-theme`; `system` follows the browser device's appearance. The app chrome (start screen, header, controls, dialogs) derives its colors from the same resolved theme and switches with it, so the interface stays consistent in light and dark. If the configured font is installed as an OTF, TTF, WOFF, or WOFF2 file in a standard macOS font directory, the server makes it available to the authenticated browser. Set `GHOSTTY_BIN` if the Ghostty executable is installed in a nonstandard location. The configuration is read once per server process, so restart the server after editing Ghostty's config.
 
 `ghostty-web` uses Ghostty's terminal parser but a browser Canvas renderer, not Ghostty's native Metal renderer. Font rasterization, ligature shaping, custom shaders, macOS-only font thickening, and some cursor/cell metric details cannot be pixel-identical to the native application.
 
-`ghostty-web@0.4.0` does not expose cell-metric adjustments. This project carries a small [`patchedDependencies`](./patches/ghostty-web@0.4.0.patch) patch that applies Ghostty's pixel/percentage width and height adjustments during font measurement. Remove it when upstream exposes equivalent options.
+`ghostty-web@0.4.0` does not expose cell-metric adjustments. This project carries a small [`patchedDependencies`](./patches/ghostty-web@0.4.0.patch) patch that applies Ghostty's pixel/percentage width and height adjustments during font measurement and restores the default mouse cursor when no link is hovered. Remove it when upstream exposes equivalent options.
 
 Herdr remains the source of durable session state. If the Bun server restarts, its PTYs and replay buffers are lost, but Herdr's named sessions continue running and appear on the start screen for re-attachment. No tmux-like persistence layer is added.
 
@@ -57,7 +59,7 @@ Transport is WebSocket first. After repeated WebSocket connection failures the b
 
 The terminal uses the full available viewport, including iPhone safe areas. Tap the terminal to focus the software keyboard. The top-right **Keys** menu includes `Ctrl`, `Alt`, `Esc`, `Tab`, and arrow keys.
 
-When an application enables terminal mouse reporting, clicks, taps, drags, and wheel events are encoded as terminal cell events and forwarded to its PTY. This makes Herdr's TUI directly operable without pretending its painted terminal cells are DOM controls.
+When an application enables terminal mouse reporting, clicks, taps, drags, and wheel events are encoded as terminal cell events and forwarded to its PTY. This makes Herdr's TUI directly operable without pretending its painted terminal cells are DOM controls. Hold Shift while clicking or dragging to bypass mouse reporting and select text, as in Ghostty.
 
 `Ctrl` and `Alt` latch for the next key. For example, tap `Ctrl`, then type `C` or `B` on the software keyboard. The modifier clears after that input.
 
@@ -86,6 +88,12 @@ ingress:
   - hostname: herdr.example.com
     service: http://127.0.0.1:8787
   - service: http_status:404
+```
+
+Because the browser then reaches the app under a public hostname, list that hostname in `PUBLIC_HOSTS` so the server accepts its requests:
+
+```sh
+PUBLIC_HOSTS=herdr.example.com bun start
 ```
 
 Validate and run:
@@ -118,7 +126,7 @@ WebSocket client messages are `input` or `resize`; server messages are `output` 
 
 ## Limitations
 
-- Single trusted operator; no in-app authentication or authorization.
+- Single trusted operator; no in-app authentication or authorization. The server only answers requests whose `Host` is a loopback name or listed in the comma-separated `PUBLIC_HOSTS`, and whose `Origin`, when sent, matches that host. This blocks DNS rebinding, but it is not authentication: keep Cloudflare Access in front of any public hostname.
 - Session registry and 1 MiB replay buffers live in Bun memory.
 - If two browsers attach to one web session, both can send input and the latest resize wins.
 - Herdr's own session history/state survives app-server restarts; the browser terminal's prior scrollback does not.

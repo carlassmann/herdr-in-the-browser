@@ -15,18 +15,21 @@ export class SessionManager {
     const existing = this.sessions.get(name);
     if (existing?.isRunning()) return existing;
 
-    const session = new TerminalSession(name, mode);
+    const session = new TerminalSession(name, mode, () => {
+      if (this.sessions.get(name) === session) this.sessions.delete(name);
+    });
     this.sessions.set(name, session);
     return session;
   }
 
   async stop(name: string): Promise<void> {
     validateSessionName(name);
+    if (!findHerdr()) throw new Error("herdr was not found on PATH.");
+
     const session = this.sessions.get(name);
     session?.stop();
     this.sessions.delete(name);
 
-    if (!findHerdr()) throw new Error("herdr was not found on PATH.");
     const [file, ...args] = herdrCommand(["session", "stop", name]);
     const child = Bun.spawn([file!, ...args], {
       stdout: "ignore",

@@ -5,7 +5,6 @@ export type TransportState = "connecting" | "connected" | "disconnected";
 interface TransportCallbacks {
   onMessage(message: ServerMessage): void;
   onState(state: TransportState): void;
-  onFreshConnection(): void;
   getSize?(): { cols: number; rows: number };
 }
 
@@ -34,6 +33,7 @@ export class ReconnectingTransport implements Transport {
 
   connect(): void {
     this.closed = false;
+    this.retry = 0;
     this.generation += 1;
     this.abortController.abort();
     this.abortController = new AbortController();
@@ -86,7 +86,6 @@ export class ReconnectingTransport implements Transport {
       opened = true;
       this.retry = 0;
       this.websocketFailures = 0;
-      this.callbacks.onFreshConnection();
       this.callbacks.onState("connected");
     });
     socket.addEventListener("message", (event) =>
@@ -111,7 +110,6 @@ export class ReconnectingTransport implements Transport {
     this.events = events;
     events.addEventListener("open", () => {
       this.retry = 0;
-      this.callbacks.onFreshConnection();
       this.callbacks.onState("connected");
     });
     events.addEventListener("message", (event) => this.deliver(event.data));

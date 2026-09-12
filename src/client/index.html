@@ -12,6 +12,8 @@
       name="apple-mobile-web-app-status-bar-style"
       content="black-translucent"
     />
+    <!-- Bun's HTML bundler resolves `href` on link tags as bundle inputs and
+         fails on these server routes; `data-href` keeps them out of the graph. -->
     <link rel="icon" data-href="/terminal.svg" />
     <link rel="apple-touch-icon" data-href="/terminal-180.png" />
     <link rel="manifest" data-href="/manifest.webmanifest" />

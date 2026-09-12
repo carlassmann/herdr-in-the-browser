@@ -75,7 +75,6 @@ async function buildGhosttyAppearance(): Promise<TerminalAppearance> {
 
   const fontFaces = availableFontFaces(config ?? "", appearance.fontFamily);
   if (fontFaces.length) {
-    appearance.fontUrl = "/api/appearance/font";
     appearance.fontFaces = fontFaces;
   }
   return appearance;

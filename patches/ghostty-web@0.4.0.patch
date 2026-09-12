@@ -1,5 +1,8 @@
+diff --git a/node_modules/ghostty-web/.bun-tag-acbd94173e7d362f b/.bun-tag-acbd94173e7d362f
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/ghostty-web.js b/dist/ghostty-web.js
-index a4ca427b95288e70c782ce303013cd644893dcec..7fd74da6f81c0ecfeb62f0f52fb3b66c2f4e3319 100644
+index a4ca427b95288e70c782ce303013cd644893dcec..6c2540f78baf02f704932b819d27a7116fce0939 100644
 --- a/dist/ghostty-web.js
 +++ b/dist/ghostty-web.js
 @@ -1338,7 +1338,7 @@ class $ {
@@ -28,6 +31,15 @@ index a4ca427b95288e70c782ce303013cd644893dcec..7fd74da6f81c0ecfeb62f0f52fb3b66c
    }
    /**
     * Remeasure font metrics (call after font loads or changes)
+@@ -2136,7 +2142,7 @@ class IA {
+       }
+     }, this.handleMouseLeave = () => {
+       var g, E;
+-      this.renderer && this.wasmTerm && ((this.renderer.hoveredHyperlinkId || 0) > 0 && this.renderer.setHoveredHyperlinkId(0), this.renderer.setHoveredLinkRange(null)), this.currentHoveredLink && ((E = (g = this.currentHoveredLink).hover) == null || E.call(g, !1), this.currentHoveredLink = void 0, this.element && (this.element.style.cursor = "text"));
++      this.renderer && this.wasmTerm && ((this.renderer.hoveredHyperlinkId || 0) > 0 && this.renderer.setHoveredHyperlinkId(0), this.renderer.setHoveredLinkRange(null)), this.currentHoveredLink && ((E = (g = this.currentHoveredLink).hover) == null || E.call(g, !1), this.currentHoveredLink = void 0, this.element && (this.element.style.cursor = ""));
+     }, this.handleClick = async (g) => {
+       if (!this.canvas || !this.renderer || !this.linkDetector || !this.wasmTerm)
+         return;
 @@ -2203,6 +2209,8 @@ class IA {
        scrollback: A.scrollback ?? 1e4,
        fontSize: A.fontSize ?? 15,
@@ -46,8 +58,17 @@ index a4ca427b95288e70c782ce303013cd644893dcec..7fd74da6f81c0ecfeb62f0f52fb3b66c
          cursorStyle: this.options.cursorStyle,
          cursorBlink: this.options.cursorBlink,
          theme: this.options.theme
+@@ -2712,7 +2722,7 @@ class IA {
+       k = N + C;
+     this.linkDetector.getLinkAt(g, k).then((h) => {
+       var G, U, t, c;
+-      if (h !== this.currentHoveredLink && ((U = (G = this.currentHoveredLink) == null ? void 0 : G.hover) == null || U.call(G, !1), this.currentHoveredLink = h, (t = h == null ? void 0 : h.hover) == null || t.call(h, !0), this.element && (this.element.style.cursor = h ? "pointer" : "text"), this.renderer))
++      if (h !== this.currentHoveredLink && ((U = (G = this.currentHoveredLink) == null ? void 0 : G.hover) == null || U.call(G, !1), this.currentHoveredLink = h, (t = h == null ? void 0 : h.hover) == null || t.call(h, !0), this.element && (this.element.style.cursor = h ? "pointer" : ""), this.renderer))
+         if (h) {
+           const F = ((c = this.wasmTerm) == null ? void 0 : c.getScrollbackLength()) || 0, S = this.getViewportY(), x = Math.max(0, Math.floor(S)), p = h.range.start.y - F + x, T = h.range.end.y - F + x;
+           p < this.rows && T >= 0 ? this.renderer.setHoveredLinkRange({
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 19c99f9caf2f6b006496c0db3b32ea4ea96496a6..32109c1ca34a2cf97047ad0b2469013d0f65848e 100644
+index 19c99f9caf2f6b006496c0db3b32ea4ea96496a6..b4030eeaa90d4335d254277861b2854d2fc9801b 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -3,6 +3,8 @@ export declare class CanvasRenderer {

@@ -4,7 +4,7 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: "output"; data: string; cursor: number }
-  | { type: "status"; connected: boolean }
+  | { type: "status"; running: boolean }
   | { type: "sync"; cursor: number; reset: boolean };
 
 export type SessionMode = "create" | "attach";
@@ -17,7 +17,6 @@ export interface SessionSummary {
 export interface TerminalAppearance {
   fontFamily: string;
   fontSize: number;
-  fontUrl?: string;
   fontFaces?: Array<{
     url: string;
     style: "normal" | "italic";

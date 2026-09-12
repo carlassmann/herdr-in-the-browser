@@ -7,6 +7,7 @@ import type {
 } from "../shared/protocol";
 import homepage from "../client/index.html";
 import { loadGhosttyAppearance, loadGhosttyFont } from "./ghostty-config";
+import { isTrustedRequest, parsePublicHosts } from "./request-origin";
 import { isClientMessage } from "./session";
 import { SessionManager } from "./session-manager";
 
@@ -14,6 +15,7 @@ const host = "127.0.0.1";
 const port = Number(process.env.PORT ?? 8787);
 const development = process.env.NODE_ENV !== "production";
 const publicDirectory = join(process.cwd(), "public");
+const publicHosts = parsePublicHosts(process.env.PUBLIC_HOSTS);
 const sessions = new SessionManager();
 
 interface SocketData {
@@ -64,7 +66,7 @@ const server = Bun.serve<SocketData>({
       GET: guard(async () => json({ sessions: await sessions.list() })),
       POST: guard(async (request: BunRequest<"/api/sessions">) => {
         try {
-          const body = (await request.json()) as {
+          const body = ((await readJson(request)) ?? {}) as {
             name?: unknown;
             mode?: unknown;
           };
@@ -229,9 +231,15 @@ function guard<T extends Request, Args extends unknown[]>(
   ) => Response | void | Promise<Response | void>,
 ) {
   return (request: T, ...args: Args) =>
-    isSameOrigin(request)
+    isTrustedRequest(
+      {
+        host: request.headers.get("host"),
+        origin: request.headers.get("origin"),
+      },
+      publicHosts,
+    )
       ? handler(request, ...args)
-      : json({ error: "Cross-origin request rejected." }, 403);
+      : json({ error: "Untrusted request origin." }, 403);
 }
 
 function fontRoute(variant: "regular" | "bold" | "italic" | "bold-italic") {
@@ -254,11 +262,19 @@ async function receiveSessionMessage(
 ): Promise<Response> {
   const session = sessions.get(request.params.id);
   if (!session) return json({ error: "Session not found." }, 404);
-  const body: unknown = await request.json();
+  const body = await readJson(request);
   if (!isClientMessage(body) || body.type !== type)
     return json({ error: "Invalid message." }, 400);
   session.receive(body);
   return new Response(null, { status: 204 });
+}
+
+async function readJson(request: Request): Promise<unknown> {
+  try {
+    return await request.json();
+  } catch {
+    return undefined;
+  }
 }
 
 function readCursor(request: Request): number {
@@ -280,16 +296,8 @@ function readDimension(
   return Math.min(maximum, Math.max(minimum, Math.floor(value)));
 }
 
-function isSameOrigin(request: Request): boolean {
-  const origin = request.headers.get("origin");
-  if (!origin) return true;
-  try {
-    return new URL(origin).host === request.headers.get("host");
-  } catch {
-    return false;
-  }
-}
-
 function staticFile(name: string, headers: Record<string, string>) {
-  return new Response(Bun.file(join(publicDirectory, name)), { headers });
+  return guard(
+    () => new Response(Bun.file(join(publicDirectory, name)), { headers }),
+  );
 }

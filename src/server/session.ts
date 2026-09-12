@@ -6,6 +6,7 @@ import type {
   SessionSummary,
 } from "../shared/protocol";
 import { herdrCommand } from "./herdr";
+import { PrivateModeTracker } from "./terminal-modes";
 
 const MAX_REPLAY_BYTES = 1024 * 1024;
 
@@ -58,9 +59,10 @@ export class TerminalSession {
   private readonly process: IPty;
   private readonly listeners = new Set<Listener>();
   private readonly replay = new ReplayBuffer();
+  private readonly modes = new PrivateModeTracker();
   private running = true;
 
-  constructor(name: string, mode: SessionMode) {
+  constructor(name: string, mode: SessionMode, onExit: () => void = () => {}) {
     this.name = name;
     const args =
       mode === "attach" ? ["session", "attach", name] : ["--session", name];
@@ -79,11 +81,13 @@ export class TerminalSession {
 
     this.process.onData((data) => {
       const cursor = this.replay.append(data);
+      this.modes.observe(data);
       this.publish({ type: "output", data, cursor });
     });
     this.process.onExit(() => {
       this.running = false;
-      this.publish({ type: "status", connected: false });
+      this.publish({ type: "status", running: false });
+      onExit();
     });
   }
 
@@ -100,9 +104,12 @@ export class TerminalSession {
 
   subscribe(listener: Listener, cursor = 0): () => void {
     this.listeners.add(listener);
-    listener({ type: "status", connected: this.running });
+    listener({ type: "status", running: this.running });
     const replay = this.replay.after(cursor);
     listener({ type: "sync", cursor: replay.cursor, reset: replay.reset });
+    const restore = replay.reset ? this.modes.restoreSequence() : "";
+    if (restore)
+      listener({ type: "output", data: restore, cursor: replay.cursor });
     for (const chunk of replay.chunks) {
       listener({ type: "output", ...chunk });
     }

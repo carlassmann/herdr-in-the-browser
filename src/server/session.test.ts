@@ -30,4 +30,29 @@ describe("terminal replay", () => {
       chunks: [],
     });
   });
+
+  test("keeps every chunk while the buffer is exactly full", () => {
+    const replay = new ReplayBuffer(6);
+    replay.append("abc");
+    replay.append("def");
+
+    expect(replay.after(0)).toMatchObject({
+      cursor: 0,
+      reset: false,
+      chunks: [{ data: "abc" }, { data: "def" }],
+    });
+  });
+
+  test("evicts the oldest chunk once the buffer overflows", () => {
+    const replay = new ReplayBuffer(6);
+    replay.append("abc");
+    replay.append("def");
+    replay.append("g");
+
+    expect(replay.after(0)).toMatchObject({
+      cursor: 3,
+      reset: true,
+      chunks: [{ data: "def" }, { data: "g" }],
+    });
+  });
 });

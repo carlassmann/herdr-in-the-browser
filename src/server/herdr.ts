@@ -21,21 +21,23 @@ export function herdrExecutable(): string {
   return executable;
 }
 
-// bun-pty ignores its `env` option, so the child inherits the server's own
-// environment. A shell wrapper clears Herdr's nesting markers before exec'ing
-// the real binary, which otherwise refuses to run nested inside a Herdr pane.
 export function herdrCommand(
   args: string[],
   environment: Record<string, string> = {},
 ): string[] {
-  const lines = [`unset ${HERDR_RUNTIME_VARIABLES.join(" ")}`];
-  for (const [name, value] of Object.entries(environment)) {
-    lines.push(`export ${name}=${shellQuote(value)}`);
-  }
-  lines.push('exec "$@"');
-  return ["/bin/sh", "-c", lines.join("; "), "sh", herdrExecutable(), ...args];
+  return outsideHerdr([herdrExecutable(), ...args], environment);
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
+// Herdr refuses to run nested inside another Herdr pane. bun-pty's `env`
+// option only adds variables to the inherited environment, so the nesting
+// markers are removed by `env -u` in front of the real command instead.
+export function outsideHerdr(
+  command: string[],
+  environment: Record<string, string> = {},
+): string[] {
+  const unsets = HERDR_RUNTIME_VARIABLES.flatMap((name) => ["-u", name]);
+  const assignments = Object.entries(environment).map(
+    ([name, value]) => `${name}=${value}`,
+  );
+  return ["/usr/bin/env", ...unsets, ...assignments, ...command];
 }

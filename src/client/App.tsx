@@ -9,8 +9,7 @@ import {
 } from "./appearance";
 import { MobileToolbar } from "./MobileToolbar";
 import { TerminalControlsProvider } from "./TerminalControls";
-import { TerminalView } from "./TerminalView";
-import type { TransportState } from "./transport";
+import { TerminalView, type SessionState } from "./TerminalView";
 
 const LAST_SESSION_KEY = "herdr-web:last-session";
 
@@ -19,7 +18,7 @@ export function App() {
   const [activeSession, setActiveSession] = useState<string | null>(() =>
     localStorage.getItem(LAST_SESSION_KEY),
   );
-  const [connection, setConnection] = useState<TransportState>("connecting");
+  const [connection, setConnection] = useState<SessionState>("connecting");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [stopDialogOpen, setStopDialogOpen] = useState(false);
@@ -30,9 +29,7 @@ export function App() {
     try {
       const response = await fetch("/api/sessions");
       if (!response.ok) {
-        throw new Error(
-          await responseError(response, "Could not load sessions."),
-        );
+        throw await responseError(response, "Could not load sessions.");
       }
       const body = (await response.json()) as { sessions: SessionSummary[] };
       setSessions(body.sessions);
@@ -65,14 +62,23 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (connection !== "exited") return;
+    localStorage.removeItem(LAST_SESSION_KEY);
+  }, [connection]);
+
+  // Reopening the app resumes the last session only while it is still running;
+  // restarting a stopped one stays an explicit choice on the picker.
+  useEffect(() => {
     if (!activeSession || loading) return;
     if (openedSessionRef.current === activeSession) return;
     const known = sessions.find((session) => session.name === activeSession);
+    if (known?.status !== "running") {
+      localStorage.removeItem(LAST_SESSION_KEY);
+      setActiveSession(null);
+      return;
+    }
     openedSessionRef.current = activeSession;
-    void openSession(
-      activeSession,
-      known?.status === "stopped" ? "create" : "attach",
-    ).catch(() => {
+    void openSession(activeSession, "attach").catch(() => {
       openedSessionRef.current = null;
       localStorage.removeItem(LAST_SESSION_KEY);
       setActiveSession(null);
@@ -89,12 +95,10 @@ export function App() {
         body: JSON.stringify({ name, mode }),
       });
       if (!response.ok) {
-        throw new Error(
-          await responseError(response, "Could not open that session."),
-        );
+        throw await responseError(response, "Could not open that session.");
       }
       const body = (await response.json()) as { session?: SessionSummary };
-      if (!body.session) throw new Error("Could not open that session.");
+      if (!body.session) throw new RequestError("Could not open that session.");
       const session = body.session;
       setSessions((current) => [
         session,
@@ -106,7 +110,7 @@ export function App() {
       openedSessionRef.current = null;
       const message = errorMessage(error, "Could not open that session.");
       setError(message);
-      throw new Error(message);
+      throw new RequestError(message);
     }
   };
 
@@ -119,7 +123,11 @@ export function App() {
         { method: "DELETE" },
       );
       if (!response.ok) {
-        setError(await responseError(response, "Could not stop that session."));
+        const failure = await responseError(
+          response,
+          "Could not stop that session.",
+        );
+        setError(failure.message);
         return;
       }
       setStopDialogOpen(false);
@@ -283,22 +291,26 @@ export function App() {
   );
 }
 
+// Only a message the server explained is worth showing; network failures
+// surface as their own generic fallback instead of "Failed to fetch".
+class RequestError extends Error {}
+
 async function responseError(
   response: Response,
   fallback: string,
-): Promise<string> {
+): Promise<RequestError> {
   try {
     const body = (await response.json()) as { error?: unknown };
-    return typeof body.error === "string" ? body.error : fallback;
+    return new RequestError(
+      typeof body.error === "string" ? body.error : fallback,
+    );
   } catch {
-    return fallback;
+    return new RequestError(fallback);
   }
 }
 
 function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.name === "Error"
-    ? error.message
-    : fallback;
+  return error instanceof RequestError ? error.message : fallback;
 }
 
 function NewSessionForm({

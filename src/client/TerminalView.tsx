@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FitAddon, init, Terminal } from "ghostty-web";
-import type { TerminalAppearance } from "../shared/protocol";
+import type { TerminalAppearance, TerminalTheme } from "../shared/protocol";
 import {
   applyAppearance,
   loadAppearance,
@@ -14,9 +14,11 @@ import { ReconnectingTransport, type TransportState } from "./transport";
 
 const ghosttyReady = init();
 
+export type SessionState = TransportState | "exited";
+
 interface TerminalViewProps {
   sessionId: string;
-  onConnectionChange(state: TransportState): void;
+  onConnectionChange(state: SessionState): void;
 }
 
 export function TerminalView({
@@ -28,7 +30,6 @@ export function TerminalView({
   const transportRef = useRef<ReconnectingTransport | undefined>(undefined);
   const modifiersRef = useRef({ control: false, alt: false });
   const [ready, setReady] = useState(false);
-  const [appearanceVersion, setAppearanceVersion] = useState(0);
   const { modifiers, setModifiers, registerInputHandler } =
     useTerminalControls();
 
@@ -87,26 +88,26 @@ export function TerminalView({
         disposeWithEffect(
           watchSystemAppearance(() => {
             applyAppearance(appearance);
-            setAppearanceVersion((version) => version + 1);
+            repaintWithTheme(terminal, resolveAppearance(appearance).theme);
           }),
         );
       }
 
+      let exited = false;
       const transport = new ReconnectingTransport(sessionId, {
         getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
         onMessage(message) {
-          if (message.type === "output") terminal?.write(message.data);
+          if (message.type === "output") terminal.write(message.data);
           else if (message.type === "sync") {
             if (message.reset) terminal.reset();
-          } else if (!message.connected) onConnectionChange("disconnected");
+          } else if (!message.running) {
+            exited = true;
+            onConnectionChange("exited");
+            transport.close();
+          }
         },
-        onState: onConnectionChange,
-        onFreshConnection() {
-          transport.send({
-            type: "resize",
-            cols: terminal.cols,
-            rows: terminal.rows,
-          });
+        onState(state) {
+          if (!exited) onConnectionChange(state);
         },
       });
       disposeWithEffect(() => transport.close());
@@ -161,7 +162,7 @@ export function TerminalView({
       transportRef.current = undefined;
       terminalRef.current = undefined;
     };
-  }, [sessionId, onConnectionChange, setModifiers, appearanceVersion]);
+  }, [sessionId, onConnectionChange, setModifiers]);
 
   return (
     <div
@@ -183,6 +184,26 @@ function attachMouseReporting(
   terminal: Terminal,
   send: (data: string) => void,
 ): () => void {
+  let forwardedPointer: number | undefined;
+
+  const reportsMouse = () =>
+    terminal.hasMouseTracking() && Boolean(terminal.renderer);
+
+  // Like Ghostty, Shift bypasses mouse reporting so text stays selectable.
+  const bypassesReporting = (event: MouseEvent) => event.shiftKey;
+
+  const cellAt = (event: { clientX: number; clientY: number }) => {
+    const renderer = terminal.renderer!;
+    const bounds = renderer.getCanvas().getBoundingClientRect();
+    const metrics = renderer.getMetrics();
+    const col = Math.floor((event.clientX - bounds.left) / metrics.width) + 1;
+    const row = Math.floor((event.clientY - bounds.top) / metrics.height) + 1;
+    return {
+      col: Math.min(terminal.cols, Math.max(1, col)),
+      row: Math.min(terminal.rows, Math.max(1, row)),
+    };
+  };
+
   const pointerButton = (event: PointerEvent): 0 | 1 | 2 | 3 => {
     if (event.button === 1) return 1;
     if (event.button === 2) return 2;
@@ -200,21 +221,11 @@ function attachMouseReporting(
     event: PointerEvent,
     options: { release?: boolean; motion?: boolean } = {},
   ) => {
-    if (!terminal.hasMouseTracking() || !terminal.renderer) return false;
-    const canvas = terminal.renderer.getCanvas();
-    const bounds = canvas.getBoundingClientRect();
-    const metrics = terminal.renderer.getMetrics();
-    const col = Math.floor((event.clientX - bounds.left) / metrics.width) + 1;
-    const row = Math.floor((event.clientY - bounds.top) / metrics.height) + 1;
-    if (col < 1 || col > terminal.cols || row < 1 || row > terminal.rows)
-      return false;
-
     send(
       encodeTerminalMouse(
         {
           button: options.motion ? heldButton(event) : pointerButton(event),
-          col,
-          row,
+          ...cellAt(event),
           release: options.release,
           motion: options.motion,
           shift: event.shiftKey,
@@ -225,42 +236,43 @@ function attachMouseReporting(
       ),
     );
     event.preventDefault();
-    event.stopPropagation();
-    return true;
   };
 
   const onPointerDown = (event: PointerEvent) => {
-    if (!sendPointer(event)) return;
+    if (!reportsMouse() || bypassesReporting(event)) return;
+    terminal.focus();
+    sendPointer(event);
+    forwardedPointer = event.pointerId;
     container.setPointerCapture(event.pointerId);
   };
   const onPointerMove = (event: PointerEvent) => {
-    const anyMotion = terminal.getMode(1003);
-    const buttonMotion = terminal.getMode(1002) && event.buttons !== 0;
-    if (anyMotion || buttonMotion) sendPointer(event, { motion: true });
+    if (!reportsMouse()) return;
+    const dragging =
+      forwardedPointer === event.pointerId && event.buttons !== 0;
+    const anyMotion = terminal.getMode(1003) && !bypassesReporting(event);
+    if (dragging || anyMotion) sendPointer(event, { motion: true });
   };
   const onPointerUp = (event: PointerEvent) => {
-    sendPointer(event, { release: true });
+    if (forwardedPointer !== event.pointerId) return;
+    forwardedPointer = undefined;
+    if (reportsMouse()) sendPointer(event, { release: true });
     if (container.hasPointerCapture(event.pointerId)) {
       container.releasePointerCapture(event.pointerId);
     }
   };
-  const onContextMenu = (event: MouseEvent) => {
-    if (terminal.hasMouseTracking()) event.preventDefault();
+  const suppressWhileReporting = (event: MouseEvent) => {
+    if (!reportsMouse() || bypassesReporting(event)) return;
+    event.preventDefault();
+    event.stopPropagation();
   };
 
   terminal.attachCustomWheelEventHandler((event) => {
-    if (!terminal.hasMouseTracking() || !terminal.renderer) return false;
-    const canvas = terminal.renderer.getCanvas();
-    const bounds = canvas.getBoundingClientRect();
-    const metrics = terminal.renderer.getMetrics();
-    const col = Math.floor((event.clientX - bounds.left) / metrics.width) + 1;
-    const row = Math.floor((event.clientY - bounds.top) / metrics.height) + 1;
+    if (!reportsMouse() || bypassesReporting(event)) return false;
     send(
       encodeTerminalMouse(
         {
           button: 3,
-          col,
-          row,
+          ...cellAt(event),
           wheel: event.deltaY < 0 ? "up" : "down",
           shift: event.shiftKey,
           alt: event.altKey,
@@ -276,7 +288,8 @@ function attachMouseReporting(
   container.addEventListener("pointermove", onPointerMove, true);
   container.addEventListener("pointerup", onPointerUp, true);
   container.addEventListener("pointercancel", onPointerUp, true);
-  container.addEventListener("contextmenu", onContextMenu);
+  container.addEventListener("dblclick", suppressWhileReporting, true);
+  container.addEventListener("contextmenu", suppressWhileReporting, true);
 
   return () => {
     terminal.attachCustomWheelEventHandler(undefined);
@@ -284,25 +297,32 @@ function attachMouseReporting(
     container.removeEventListener("pointermove", onPointerMove, true);
     container.removeEventListener("pointerup", onPointerUp, true);
     container.removeEventListener("pointercancel", onPointerUp, true);
-    container.removeEventListener("contextmenu", onContextMenu);
+    container.removeEventListener("dblclick", suppressWhileReporting, true);
+    container.removeEventListener("contextmenu", suppressWhileReporting, true);
   };
 }
 
-async function loadConfiguredFont(
+// ghostty-web does not support a theme change through `terminal.options`, so
+// the renderer is retinted directly and asked for one full repaint.
+function repaintWithTheme(terminal: Terminal, theme: TerminalTheme): void {
+  const { renderer, wasmTerm } = terminal;
+  if (!renderer || !wasmTerm) return;
+  renderer.setTheme(theme);
+  renderer.render(wasmTerm, true, terminal.getViewportY(), terminal);
+}
+
+let configuredFontPromise: Promise<string> | undefined;
+
+function loadConfiguredFont(appearance: TerminalAppearance): Promise<string> {
+  configuredFontPromise ??= addConfiguredFontFaces(appearance);
+  return configuredFontPromise;
+}
+
+async function addConfiguredFontFaces(
   appearance: TerminalAppearance,
 ): Promise<string> {
   const configuredFamily = appearance.fontFamily.replace(/["\\]/g, "");
-  const faces =
-    appearance.fontFaces ??
-    (appearance.fontUrl
-      ? [
-          {
-            url: appearance.fontUrl,
-            style: "normal" as const,
-            weight: "400" as const,
-          },
-        ]
-      : []);
+  const faces = appearance.fontFaces ?? [];
   if (!faces.length) {
     return `"${configuredFamily}", "Geist Mono Variable", ui-monospace, monospace`;
   }
