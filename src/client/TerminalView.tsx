@@ -7,7 +7,12 @@ import {
   resolveAppearance,
   watchSystemAppearance,
 } from "./appearance";
-import { encodeModifiedInput } from "./keyboard";
+import { TerminalModeTracker } from "../shared/terminal-modes";
+import {
+  encodeModifiedInput,
+  TerminalKeyEncoder,
+  type Modifiers,
+} from "./keyboard";
 import {
   createWheelTickAccumulator,
   encodeTerminalMouse,
@@ -108,12 +113,18 @@ export function TerminalView({
       }
 
       let exited = false;
+      const modes = new TerminalModeTracker();
       const transport = new ReconnectingTransport(sessionId, {
         getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
         onMessage(message) {
-          if (message.type === "output") terminal.write(message.data);
-          else if (message.type === "sync") {
-            if (message.reset) terminal.reset();
+          if (message.type === "output") {
+            modes.observe(message.data);
+            terminal.write(message.data);
+          } else if (message.type === "sync") {
+            if (message.reset) {
+              terminal.reset();
+              modes.reset();
+            }
           } else if (!message.running) {
             exited = true;
             onConnectionChange("exited");
@@ -127,16 +138,24 @@ export function TerminalView({
       disposeWithEffect(() => transport.close());
       transportRef.current = transport;
 
+      const releaseModifiers = () => {
+        modifiersRef.current = { control: false, alt: false };
+        setModifiers({ control: false, alt: false });
+      };
       const inputSubscription = terminal.onData((data) => {
         const modifiers = modifiersRef.current;
         const transformed = encodeModifiedInput(data, modifiers);
-        if (modifiers.control || modifiers.alt) {
-          modifiersRef.current = { control: false, alt: false };
-          setModifiers({ control: false, alt: false });
-        }
+        if (modifiers.control || modifiers.alt) releaseModifiers();
         transport.send({ type: "input", data: transformed });
       });
       disposeWithEffect(() => inputSubscription.dispose());
+      disposeWithEffect(
+        attachKeyboardInput(containerRef.current, terminal, modes, {
+          heldModifiers: () => modifiersRef.current,
+          releaseModifiers,
+          send: (data) => transport.send({ type: "input", data }),
+        }),
+      );
       const resizeSubscription = terminal.onResize(({ cols, rows }) =>
         transport.send({ type: "resize", cols, rows }),
       );
@@ -191,6 +210,66 @@ export function TerminalView({
       />
     </div>
   );
+}
+
+interface KeyboardInputSink {
+  heldModifiers(): Modifiers;
+  releaseModifiers(): void;
+  send(data: string): void;
+}
+
+// ghostty-web's own key handling ignores the keyboard protocol an application
+// negotiated, drops Shift from Enter and friends, and pastes without
+// bracketing. Take over key, paste, and focus events and encode them the way
+// native Ghostty does.
+function attachKeyboardInput(
+  container: HTMLDivElement,
+  terminal: Terminal,
+  modes: TerminalModeTracker,
+  sink: KeyboardInputSink,
+): () => void {
+  const keys = new TerminalKeyEncoder(terminal.ghostty.createKeyEncoder(), {
+    optionAsAlt: true,
+  });
+
+  terminal.attachCustomKeyEventHandler((event) => {
+    const held = sink.heldModifiers();
+    const data = keys.encode(event, held, {
+      kittyFlags: modes.kittyFlags,
+      modifyOtherKeys: modes.modifyOtherKeys,
+      applicationCursorKeys: terminal.getMode(1),
+      applicationKeypad: terminal.getMode(66),
+    });
+    if (data === undefined) return false;
+    if (held.control || held.alt) sink.releaseModifiers();
+    if (data) sink.send(data);
+    return true;
+  });
+
+  const onPaste = (event: ClipboardEvent) => {
+    const text = event.clipboardData?.getData("text/plain");
+    if (!text) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    sink.send(terminal.getMode(2004) ? `\u001b[200~${text}\u001b[201~` : text);
+  };
+  const onFocusIn = () => {
+    if (terminal.getMode(1004)) sink.send("\u001b[I");
+  };
+  const onFocusOut = () => {
+    if (terminal.getMode(1004)) sink.send("\u001b[O");
+  };
+  container.addEventListener("paste", onPaste, true);
+  container.addEventListener("focusin", onFocusIn);
+  container.addEventListener("focusout", onFocusOut);
+
+  return () => {
+    terminal.attachCustomKeyEventHandler(() => false);
+    container.removeEventListener("paste", onPaste, true);
+    container.removeEventListener("focusin", onFocusIn);
+    container.removeEventListener("focusout", onFocusOut);
+    keys.dispose();
+  };
 }
 
 function attachMouseReporting(

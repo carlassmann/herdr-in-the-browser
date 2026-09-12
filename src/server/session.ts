@@ -6,7 +6,7 @@ import type {
   SessionSummary,
 } from "../shared/protocol";
 import { herdrCommand } from "./herdr";
-import { PrivateModeTracker } from "./terminal-modes";
+import { TerminalModeTracker } from "../shared/terminal-modes";
 
 const MAX_REPLAY_BYTES = 1024 * 1024;
 
@@ -59,7 +59,7 @@ export class TerminalSession {
   private readonly process: IPty;
   private readonly listeners = new Set<Listener>();
   private readonly replay = new ReplayBuffer();
-  private readonly modes = new PrivateModeTracker();
+  private readonly modes = new TerminalModeTracker();
   private running = true;
 
   constructor(name: string, mode: SessionMode, onExit: () => void = () => {}) {

@@ -41,7 +41,9 @@ The start screen lists Herdr's named sessions. You can:
 - select an existing name to run `herdr session attach <name>`;
 - use the back button to switch terminals without stopping the prior PTY.
 
-The Bun process keeps each opened PTY alive when Safari disconnects. It retains the latest 1 MiB of raw PTY output and replays it when the browser reconnects. ANSI data is forwarded as arbitrary chunks; the server only watches for DEC private mode switches (mouse reporting, alternate screen, bracketed paste, cursor visibility) so it can restore them before a replay that no longer starts at the beginning of the stream.
+The Bun process keeps each opened PTY alive when Safari disconnects. It retains the latest 1 MiB of raw PTY output and replays it when the browser reconnects. ANSI data is forwarded as arbitrary chunks; the server only watches for DEC private mode switches (mouse reporting, alternate screen, bracketed paste, cursor visibility) and keyboard protocol changes (kitty keyboard flags, xterm modifyOtherKeys) so it can restore them before a replay that no longer starts at the beginning of the stream.
+
+The browser watches the same stream and runs every key press through Ghostty's own key encoder with the negotiated protocol, so Shift+Enter, Alt combinations, and kitty keyboard sequences arrive exactly as they would from a native Ghostty window. Option acts as Alt, like Ghostty's `macos-option-as-alt`. Pastes are wrapped in bracketed paste markers when the application asked for them.
 
 Herdr normally refuses to run nested inside another Herdr pane. The server strips Herdr's nesting markers from the environment of every process it spawns, so it works whether it is launched from a plain shell or from inside Herdr.
 

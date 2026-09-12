@@ -4,13 +4,25 @@ index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2
 diff --git a/node_modules/ghostty-web/.bun-tag-acbd94173e7d362f b/.bun-tag-acbd94173e7d362f
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/ghostty-web/.bun-tag-bd64ff8c02adc8bc b/.bun-tag-bd64ff8c02adc8bc
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/node_modules/ghostty-web/.bun-tag-e2a4b0c3d9e3b383 b/.bun-tag-e2a4b0c3d9e3b383
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/ghostty-web.js b/dist/ghostty-web.js
-index a4ca427b95288e70c782ce303013cd644893dcec..9a97f2656921dca8d2ad6481d7683b0eb23931fe 100644
+index a4ca427b95288e70c782ce303013cd644893dcec..4abce4567147f8da06bb0b23f1d60d9cd6b974fc 100644
 --- a/dist/ghostty-web.js
 +++ b/dist/ghostty-web.js
+@@ -88,7 +88,7 @@ class V {
+     if (g !== 0)
+       throw new Error(`Failed to create key event: ${g}`);
+     const E = new DataView(this.exports.memory.buffer), C = E.getUint32(B, !0);
+-    if (this.exports.ghostty_wasm_free_opaque(B), this.exports.ghostty_key_event_set_action(C, A.action), this.exports.ghostty_key_event_set_key(C, A.key), this.exports.ghostty_key_event_set_mods(C, A.mods), A.utf8) {
++    if (this.exports.ghostty_wasm_free_opaque(B), this.exports.ghostty_key_event_set_action(C, A.action), this.exports.ghostty_key_event_set_key(C, A.key), this.exports.ghostty_key_event_set_mods(C, A.mods), A.consumedMods !== void 0 && this.exports.ghostty_key_event_set_consumed_mods(C, A.consumedMods), A.unshiftedCodepoint !== void 0 && this.exports.ghostty_key_event_set_unshifted_codepoint(C, A.unshiftedCodepoint), A.utf8) {
+       const M = new TextEncoder().encode(A.utf8), a = this.exports.ghostty_wasm_alloc_u8_array(M.length);
+       new Uint8Array(this.exports.memory.buffer).set(M, a), this.exports.ghostty_key_event_set_utf8(C, a, M.length), this.exports.ghostty_wasm_free_u8_array(a, M.length);
+     }
 @@ -1338,7 +1338,7 @@ class $ {
      const g = A.getContext("2d", { alpha: !0 });
      if (!g)
@@ -108,8 +120,19 @@ index a4ca427b95288e70c782ce303013cd644893dcec..9a97f2656921dca8d2ad6481d7683b0e
          if (h) {
            const F = ((c = this.wasmTerm) == null ? void 0 : c.getScrollbackLength()) || 0, S = this.getViewportY(), x = Math.max(0, Math.floor(S)), p = h.range.start.y - F + x, T = h.range.end.y - F + x;
            p < this.rows && T >= 0 ? this.renderer.setHoveredLinkRange({
+@@ -2958,6 +2994,10 @@ export {
+   AA as SelectionManager,
+   IA as Terminal,
+   _ as UrlRegexProvider,
++  o as Key,
++  b as KeyAction,
++  y as Mods,
++  u as keyCodeMap,
+   CA as getGhostty,
+   oA as init
+ };
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 19c99f9caf2f6b006496c0db3b32ea4ea96496a6..b4030eeaa90d4335d254277861b2854d2fc9801b 100644
+index 19c99f9caf2f6b006496c0db3b32ea4ea96496a6..49f247049163186a8389a7d371a8b81a0ed9a6ba 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -3,6 +3,8 @@ export declare class CanvasRenderer {
@@ -150,3 +173,19 @@ index 19c99f9caf2f6b006496c0db3b32ea4ea96496a6..b4030eeaa90d4335d254277861b2854d
  /**
   * Colors from RenderState (12 bytes packed)
   */
+@@ -1460,7 +1471,7 @@ export declare class Terminal implements ITerminalCore {
+     readonly buffer: IBufferNamespace;
+     readonly unicode: IUnicodeVersionProvider;
+     readonly options: Required<ITerminalOptions>;
+-    private ghostty?;
++    readonly ghostty: Ghostty;
+     wasmTerm?: GhosttyTerminal;
+     renderer?: CanvasRenderer;
+     private inputHandler?;
+@@ -1840,3 +1851,6 @@ export declare class UrlRegexProvider implements ILinkProvider {
+ }
+ 
+ export { }
++
++/** Browser KeyboardEvent.code to Ghostty key mapping used by InputHandler. */
++export declare const keyCodeMap: Record<string, Key>;
