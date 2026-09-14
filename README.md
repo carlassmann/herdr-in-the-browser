@@ -109,6 +109,47 @@ work run tunnel
 
 Cloudflare Tunnel supports WebSockets without an application change. When a network blocks WebSockets, the client falls back to SSE, and when SSE stalls too, to long polling. Cloudflare documents that Quick Tunnels do not support SSE, so on a Quick Tunnel the second fallback is the one that carries traffic. Prefer a named tunnel: it supports every transport and is the only kind you can put behind Cloudflare Access. See Cloudflare's [locally-managed tunnel guide](https://developers.cloudflare.com/tunnel/advanced/local-management/create-local-tunnel/), [configuration reference](https://developers.cloudflare.com/tunnel/advanced/local-management/configuration-file/), and [Tunnel FAQ](https://developers.cloudflare.com/cloudflare-one/faq/cloudflare-tunnels-faq/).
 
+To skip WebSocket attempts and try one persistent HTTP output stream, open `https://herdr.carlassmann.com/?transport=sse`. This keeps input batched over POST while avoiding repeated output polls. If SSE fails or stops delivering heartbeats, the browser falls back to polling. Use the connection logs to confirm which transport actually connected.
+
+For networks that block streaming connections, open `https://herdr.carlassmann.com/?transport=poll` to use HTTP polling immediately. Otherwise, WebSocket and SSE attempts each time out after five seconds without a first message. SSE also falls back if its heartbeats stop for 35 seconds. Reconnecting after switching tabs preserves the selected fallback.
+
+Run `work logs web` to inspect browser connection reports. Lines prefixed with `[connection]` show the session, transport, state, and failure reason when available. Reports contain no terminal input or output and require the browser's HTTP requests to reach the server.
+
+### Latency diagnostics
+
+HTTP input, resize, and polling requests carry a browser ID, request ID, and completed timing samples. Samples ride on the next request, with a beacon flush at most every 10 seconds while samples are pending, plus a flush on transport close. WebSocket messages and SSE output delivery are not timed by this instrumentation.
+
+Read aggregates from the server:
+
+```sh
+curl -s 'http://127.0.0.1:8787/api/diagnostics?session=default'
+```
+
+The same endpoint is available through Cloudflare Access at `https://herdr.carlassmann.com/api/diagnostics?session=default`. Omit `session` to inspect every browser and session. It uses the existing request-origin guard.
+
+Each group exposes count, mean, median, p95, and maximum, plus the latest 20 correlated requests:
+
+| Metric | Meaning |
+| --- | --- |
+| `queueMs` | Time the oldest input event in a batch waited before sending. |
+| `requestMs` | Browser elapsed time through response consumption, including JSON decoding for polls. |
+| `serverMs` | Server handler duration, including intentional long-poll waiting. |
+| `overheadMs` | Request duration minus server duration, clamped to zero. Includes network, proxy, transfer, and browser scheduling/decoding. |
+| `headersMs` / `consumeMs` | Time until fetch resolves with headers, then time consuming the response. These include browser scheduling. |
+| `setupMs` | Resource start to request start, including connection setup and browser queuing. |
+| `dnsMs` / `connectMs` | DNS and connection setup durations. Connection timing includes TLS where applicable. |
+| `firstByteOverheadMs` | Browser request-to-first-byte time minus server handling. Mostly request upload and network/proxy waiting. |
+| `transferMs` | First response byte to last response byte. |
+| `afterResponseMs` | Last byte received to response processing completion in JavaScript. |
+| `batchSize` | Number of input events combined, or resize events coalesced. Events include terminal protocol replies and mouse events. |
+| `inputBytes` / `outputBytes` | UTF-8 terminal payload size, excluding HTTP and JSON overhead. |
+
+Groups also list negotiated HTTP protocols when the browser exposes them. Detailed phases use the browser's [Resource Timing API](https://www.w3.org/TR/resource-timing/). Observations are bounded and joined to requests before reporting; unsupported or unavailable phases remain absent. No extra probe requests are generated. `dnsMs` and `connectMs` are parts of `setupMs`; do not add overlapping metrics together.
+
+Durations use each machine's monotonic clock. No synchronized clocks are required; timestamps identify when the server observed a request. These measurements do not measure screen paint or prove which output was caused by a particular key. A long idle poll is expected; inspect `overheadMs` separately from `serverMs`.
+
+Storage is in memory, limited to 32 browser/session pairs and 512 requests per pair from the last 10 minutes. Restarting the server clears it. Reports are best effort; requests whose browser reports never arrive still contribute server timings. Only validated timing fields and IDs are retained, never terminal contents.
+
 ### Cloudflare Access
 
 Before using the public hostname, create a **Self-hosted** Access application for `herdr.example.com` under Zero Trust → Access controls → Applications. Add an Allow policy limited to your identity or identity-provider group. Cloudflare's [self-hosted application guide](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/) covers the dashboard flow.
@@ -128,6 +169,9 @@ Do not add an Access bypass policy. This application intentionally has no accoun
 - `GET /api/session/:id/poll`
 - `POST /api/session/:id/input`
 - `POST /api/session/:id/resize`
+- `POST /api/session/:id/connection` for connection diagnostics
+- `POST /api/session/:id/diagnostics` for timing reports
+- `GET /api/diagnostics` for aggregated timings
 
 WebSocket client messages are `input` or `resize`; server messages are `output` or `status`, matching `src/shared/protocol.ts`.
 
@@ -138,5 +182,5 @@ WebSocket client messages are `input` or `resize`; server messages are `output` 
 - If two browsers attach to one web session, both can send input and the latest resize wins.
 - Herdr's own session history/state survives app-server restarts; the browser terminal's prior scrollback does not.
 - iOS may suspend network activity in the background. Herdr continues; output resumes after reconnection.
-- Fallback transports send input over `POST` and receive output over SSE or long polling. Once the client has fallen back it stays there until the page reloads.
+- Fallback transports send input over `POST` and receive output over SSE or long polling. The first input sends immediately. Up to two HTTP input/resize requests can overlap, with at least 50 ms between sends. Waiting events are batched, and the server applies numbered batches in order even if requests arrive out of order. A missing batch fails the stream and reconnects; uncertain input is not replayed automatically. Once the client has fallen back it stays there until the page reloads.
 - Ghostty settings without a browser-renderer equivalent, including custom shaders and macOS font thickening, are ignored.

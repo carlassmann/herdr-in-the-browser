@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { resourcePhases, TransportDiagnostics } from "./diagnostics";
 import { ReconnectingTransport } from "./transport";
 
 const originalFetch = globalThis.fetch;
@@ -6,6 +7,17 @@ const originalLocation = globalThis.location;
 const originalWebSocket = globalThis.WebSocket;
 const originalEventSource = globalThis.EventSource;
 const originalWindow = globalThis.window;
+const originalObserver = globalThis.PerformanceObserver;
+
+const timers = new Map<number, () => void>();
+let nextTimer = 0;
+beforeEach(() => useFakeConnections());
+
+function advanceTimer(): void {
+  const [id, callback] = timers.entries().next().value!;
+  timers.delete(id);
+  callback();
+}
 
 afterEach(() => {
   globalThis.fetch = originalFetch;
@@ -17,6 +29,8 @@ afterEach(() => {
   globalThis.WebSocket = originalWebSocket;
   globalThis.EventSource = originalEventSource;
   globalThis.window = originalWindow;
+  globalThis.PerformanceObserver = originalObserver;
+  timers.clear();
   FakeWebSocket.opened = [];
   FakeEventSource.opened = [];
 });
@@ -46,6 +60,7 @@ class FakeWebSocket extends FakeEventTarget {
   }
 
   close(): void {
+    this.readyState = 3;
     this.emit("close");
   }
 }
@@ -63,10 +78,13 @@ class FakeEventSource extends FakeEventTarget {
 
 function failWebSocketTwice(): void {
   FakeWebSocket.opened[0]!.emit("close");
+  advanceTimer();
   FakeWebSocket.opened[1]!.emit("close");
 }
 
 function useFakeConnections(): void {
+  globalThis.PerformanceObserver =
+    undefined as unknown as typeof PerformanceObserver;
   Object.defineProperty(globalThis, "location", {
     value: { protocol: "http:", host: "localhost:8787" },
     configurable: true,
@@ -75,15 +93,18 @@ function useFakeConnections(): void {
   globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
   globalThis.window = {
     setTimeout: (callback: () => void) => {
-      callback();
-      return 0;
+      const id = ++nextTimer;
+      timers.set(id, callback);
+      return id;
     },
-    clearTimeout: () => {},
+    clearTimeout: (id: number) => {
+      timers.delete(id);
+    },
   } as unknown as Window & typeof globalThis;
 }
 
 describe("SSE fallback input", () => {
-  test("waits for each POST before sending the next", async () => {
+  test("pipelines a second batch before the first acknowledgement", async () => {
     const posted: string[] = [];
     let finishFirst = () => {};
     let markSecondStarted = () => {};
@@ -107,12 +128,18 @@ describe("SSE fallback input", () => {
 
     transport.send({ type: "input", data: "a" });
     transport.send({ type: "input", data: "b" });
+    transport.send({ type: "input", data: "c" });
+    transport.send({ type: "input", data: "\r" });
     await Promise.resolve();
     expect(posted).toHaveLength(1);
 
-    finishFirst();
+    advanceTimer();
     await secondStarted;
-    expect(posted).toHaveLength(2);
+    finishFirst();
+    expect(posted.map((body) => JSON.parse(body))).toEqual([
+      { type: "input", data: "a" },
+      { type: "input", data: "bc\r" },
+    ]);
   });
 
   test("aborts an in-flight POST before reconnecting", async () => {
@@ -156,6 +183,7 @@ describe("SSE fallback input", () => {
 
     transport.send({ type: "input", data: "before" });
     await firstStarted;
+    transport.send({ type: "input", data: "stale" });
     transport.connect();
     transport.send({ type: "input", data: "after" });
 
@@ -181,6 +209,7 @@ describe("reconnection", () => {
     });
     socket.emit("close");
 
+    advanceTimer();
     expect(FakeWebSocket.opened[1]?.url).toContain("cursor=42");
     transport.close();
   });
@@ -196,6 +225,7 @@ describe("reconnection", () => {
 
     transport.connect();
     FakeWebSocket.opened[0]!.emit("close");
+    advanceTimer();
     FakeWebSocket.opened[1]!.emit("close");
 
     expect(FakeWebSocket.opened).toHaveLength(2);
@@ -242,6 +272,7 @@ describe("long-poll fallback", () => {
     transport.connect();
     failWebSocketTwice();
     FakeEventSource.opened[0]!.emit("error");
+    advanceTimer();
     FakeEventSource.opened[1]!.emit("error");
     await secondPoll;
 
@@ -264,7 +295,8 @@ describe("long-poll fallback", () => {
 
     transport.connect();
     failWebSocketTwice();
-    FakeEventSource.opened[0]!.emit("open");
+    advanceTimer();
+    advanceTimer();
 
     expect(FakeEventSource.opened).toHaveLength(2);
     transport.close();
@@ -290,6 +322,7 @@ describe("long-poll fallback", () => {
     transport.connect();
     failWebSocketTwice();
     FakeEventSource.opened[0]!.emit("error");
+    advanceTimer();
     FakeEventSource.opened[1]!.emit("error");
     await firstPoll;
     transport.close();
@@ -298,5 +331,215 @@ describe("long-poll fallback", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
 
     expect(polls).toBe(pollsAfterClose);
+  });
+});
+
+describe("blocked networks", () => {
+  test("starts directly with SSE when requested, then falls back if it stalls", () => {
+    Object.defineProperty(globalThis, "location", {
+      value: {
+        protocol: "http:",
+        host: "localhost:8787",
+        search: "?transport=sse",
+      },
+      configurable: true,
+    });
+    const urls: string[] = [];
+    globalThis.fetch = ((url) => {
+      urls.push(String(url));
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+    const states: string[] = [];
+    const transport = new ReconnectingTransport("demo", {
+      onMessage() {},
+      onState: (state) => states.push(state),
+    });
+    transport.connect();
+    expect(FakeWebSocket.opened).toHaveLength(0);
+    expect(FakeEventSource.opened).toHaveLength(1);
+    FakeEventSource.opened[0]!.emit("message", {
+      data: JSON.stringify({ type: "sync", cursor: 42, reset: false }),
+    });
+    expect(states.at(-1)).toBe("connected");
+    advanceTimer();
+    expect(urls).toEqual(["/api/session/demo/poll?cursor=42"]);
+    transport.close();
+  });
+
+  test("reaches polling without WebSocket or SSE events and keeps it on reconnect", async () => {
+    const urls: string[] = [];
+    globalThis.fetch = ((url) => {
+      urls.push(String(url));
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+    const received: string[] = [];
+    const transport = new ReconnectingTransport("demo", {
+      onMessage: (message) => received.push(message.type),
+      onState() {},
+    });
+    transport.connect();
+    for (let attempt = 0; attempt < 6; attempt++) advanceTimer();
+    expect(urls).toEqual(["/api/session/demo/poll?cursor=0"]);
+    FakeWebSocket.opened[0]!.emit("message", {
+      data: JSON.stringify({ type: "output", data: "stale", cursor: 99 }),
+    });
+    FakeEventSource.opened[0]!.emit("message", {
+      data: JSON.stringify({ type: "output", data: "stale", cursor: 99 }),
+    });
+    expect(received).toEqual([]);
+    transport.close();
+    transport.connect();
+    expect(urls).toHaveLength(2);
+    expect(FakeWebSocket.opened).toHaveLength(2);
+    expect(FakeEventSource.opened).toHaveLength(2);
+    transport.close();
+    expect(timers.size).toBe(0);
+  });
+
+  test("falls back when an established SSE stream stops delivering heartbeats", () => {
+    const urls: string[] = [];
+    globalThis.fetch = ((url) => {
+      urls.push(String(url));
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+    const transport = new ReconnectingTransport("demo", {
+      onMessage() {},
+      onState() {},
+    });
+    transport.connect();
+    failWebSocketTwice();
+    FakeEventSource.opened[0]!.emit("message", {
+      data: JSON.stringify({ type: "sync", cursor: 42, reset: false }),
+    });
+    advanceTimer();
+    expect(urls).toEqual(["/api/session/demo/poll?cursor=42"]);
+    transport.close();
+  });
+});
+
+describe("request diagnostics", () => {
+  test("waits for resource observations before piggybacking detailed phases", async () => {
+    let observe = (_list: { getEntries(): PerformanceEntry[] }) => {};
+    class Observer {
+      static supportedEntryTypes = ["resource"];
+      constructor(callback: typeof observe) {
+        observe = callback;
+      }
+      observe() {}
+      disconnect() {}
+    }
+    globalThis.PerformanceObserver =
+      Observer as unknown as typeof PerformanceObserver;
+    const headers: Headers[] = [];
+    let resource: PerformanceResourceTiming;
+    globalThis.fetch = (async (_url, init) => {
+      headers.push(new Headers(init?.headers));
+      const now = performance.now();
+      if (headers.length === 1)
+        resource = {
+          name: "http://localhost:8787/api/session/demo/input",
+          startTime: now,
+          requestStart: now,
+          responseStart: now,
+          responseEnd: now,
+          domainLookupStart: now,
+          domainLookupEnd: now,
+          connectStart: now,
+          connectEnd: now,
+          nextHopProtocol: "h2",
+        } as PerformanceResourceTiming;
+      return new Response(null, { status: 204 });
+    }) as typeof fetch;
+    const diagnostics = new TransportDiagnostics("/api/session/demo");
+    await diagnostics.request(
+      "input",
+      "poll",
+      "/api/session/demo/input",
+      {},
+      async () => {},
+    );
+    await diagnostics.request(
+      "poll",
+      "poll",
+      "/api/session/demo/poll",
+      {},
+      async () => {},
+    );
+    expect(JSON.parse(headers[1]!.get("X-Terminal-Metrics")!)).toEqual([]);
+    observe({ getEntries: () => [resource!] });
+    await diagnostics.request(
+      "poll",
+      "poll",
+      "/api/session/demo/poll",
+      {},
+      async () => {},
+    );
+    const reports = JSON.parse(headers[2]!.get("X-Terminal-Metrics")!);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({
+      id: headers[0]!.get("X-Terminal-Request"),
+      protocol: "h2",
+      transferMs: 0,
+    });
+    diagnostics.close();
+  });
+
+  test("separates connection setup, first-byte wait, transfer, and browser work", () => {
+    expect(
+      resourcePhases(
+        {
+          startTime: 100,
+          requestStart: 130,
+          responseStart: 280,
+          responseEnd: 300,
+          domainLookupStart: 102,
+          domainLookupEnd: 107,
+          connectStart: 107,
+          connectEnd: 127,
+          nextHopProtocol: "h2",
+        },
+        310,
+      ),
+    ).toEqual({
+      setupMs: 30,
+      dnsMs: 5,
+      connectMs: 20,
+      firstByteMs: 150,
+      transferMs: 20,
+      afterResponseMs: 10,
+      protocol: "h2",
+    });
+  });
+  test("piggybacks completed timings on the next request without terminal contents", async () => {
+    const requests: Headers[] = [];
+    globalThis.fetch = (async (_url, init) => {
+      requests.push(new Headers(init?.headers));
+      return new Response(null, {
+        status: 204,
+        headers: { "X-Terminal-Server-Ms": "12.5" },
+      });
+    }) as typeof fetch;
+    const diagnostics = new TransportDiagnostics("/api/session/demo");
+    await diagnostics.request(
+      "input",
+      "poll",
+      "/input",
+      { method: "POST", body: "private terminal data" },
+      async () => {},
+      { queueMs: 75, batchSize: 4, inputBytes: 4 },
+    );
+    await diagnostics.request("poll", "poll", "/poll", {}, async () => {});
+    expect(requests).toHaveLength(2);
+    expect(requests[0]!.get("X-Terminal-Metrics")).toBeNull();
+    const [report] = JSON.parse(requests[1]!.get("X-Terminal-Metrics")!);
+    expect(report).toMatchObject({
+      id: requests[0]!.get("X-Terminal-Request"),
+      status: 204,
+      serverMs: 12.5,
+      queueMs: 75,
+      batchSize: 4,
+    });
+    expect(JSON.stringify(report)).not.toContain("private terminal data");
+    expect(requests[1]!.get("X-Terminal-Client")).toBe(diagnostics.clientId);
   });
 });

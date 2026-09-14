@@ -5,6 +5,7 @@ import type {
   SessionMode,
   SessionSummary,
 } from "../shared/protocol";
+import { OrderedInput } from "./ordered-input";
 import { herdrCommand } from "./herdr";
 import { TerminalModeTracker } from "../shared/terminal-modes";
 
@@ -61,6 +62,7 @@ export class TerminalSession {
   private readonly replay = new ReplayBuffer();
   private readonly modes = new TerminalModeTracker();
   private running = true;
+  readonly input = new OrderedInput((message) => this.receive(message));
 
   constructor(name: string, mode: SessionMode, onExit: () => void = () => {}) {
     this.name = name;
