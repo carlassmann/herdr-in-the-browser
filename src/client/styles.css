@@ -38,11 +38,18 @@
   box-sizing: border-box;
 }
 html,
-body,
-#root {
+body {
   width: 100%;
-  height: var(--app-height, 100dvh);
+  height: 100%;
   margin: 0;
+  overflow: hidden;
+}
+#root {
+  position: fixed;
+  top: var(--app-top, 0px);
+  left: var(--app-left, 0px);
+  width: var(--app-width, 100%);
+  height: var(--app-height, 100dvh);
   overflow: hidden;
 }
 body {
@@ -63,6 +70,7 @@ button {
   min-height: var(--app-height, 100dvh);
 }
 .session-page {
+  height: 100%;
   overflow-y: auto;
   padding: max(2rem, var(--safe-top)) max(1.25rem, var(--safe-right))
     max(2rem, var(--safe-bottom)) max(1.25rem, var(--safe-left));

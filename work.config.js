@@ -10,5 +10,9 @@ export default {
       run: "bun start",
       portless: false,
     },
+    tunnel: {
+      run: "cloudflared tunnel --config ~/.cloudflared/herdr-terminal.yml run herdr-terminal",
+      portless: false,
+    },
   },
 };

@@ -8,13 +8,27 @@ if ("serviceWorker" in navigator && !loopback) {
   void navigator.serviceWorker.register("/sw.js");
 }
 
-const syncViewportHeight = () => {
-  const height = window.visualViewport?.height ?? window.innerHeight;
-  document.documentElement.style.setProperty("--app-height", `${height}px`);
+const syncViewport = () => {
+  const viewport = window.visualViewport;
+  const root = document.documentElement;
+  root.style.setProperty(
+    "--app-height",
+    `${viewport?.height ?? window.innerHeight}px`,
+  );
+  root.style.setProperty("--app-top", `${viewport?.offsetTop ?? 0}px`);
+  root.style.setProperty("--app-left", `${viewport?.offsetLeft ?? 0}px`);
+  root.style.setProperty(
+    "--app-width",
+    `${viewport?.width ?? window.innerWidth}px`,
+  );
 };
-syncViewportHeight();
-window.visualViewport?.addEventListener("resize", syncViewportHeight);
-window.visualViewport?.addEventListener("scroll", syncViewportHeight);
+syncViewport();
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", syncViewport);
+  window.visualViewport.addEventListener("scroll", syncViewport);
+} else {
+  window.addEventListener("resize", syncViewport);
+}
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

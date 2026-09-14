@@ -33,7 +33,10 @@ const server = Bun.serve<SocketData>({
   hostname: host,
   port,
   idleTimeout: 0,
-  development: development ? { hmr: true, console: false } : false,
+  // Bun's HMR server rejects proxied hostnames before our host allowlist runs.
+  development: development
+    ? { hmr: publicHosts.length === 0, console: false }
+    : false,
   routes: {
     "/": homepage,
     "/manifest.webmanifest": staticFile("manifest.webmanifest", {

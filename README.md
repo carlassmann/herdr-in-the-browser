@@ -71,16 +71,16 @@ To install: open the HTTPS hostname in Safari, tap Share, choose **Add to Home S
 
 The app has no Cloudflare-specific code. Keep it on loopback and let `cloudflared` make the outbound connection.
 
-Install and authenticate:
+Install and authenticate with the Cloudflare zone that owns the hostname:
 
 ```sh
 brew install cloudflared
 cloudflared tunnel login
 cloudflared tunnel create herdr-terminal
-cloudflared tunnel route dns herdr-terminal herdr.example.com
+cloudflared tunnel route dns herdr-terminal herdr
 ```
 
-Create `~/.cloudflared/config.yml`, replacing the UUID and account path:
+Create `~/.cloudflared/herdr-terminal.yml`, replacing the UUID and account path:
 
 ```yaml
 tunnel: YOUR-TUNNEL-UUID
@@ -98,11 +98,13 @@ Because the browser then reaches the app under a public hostname, list that host
 PUBLIC_HOSTS=herdr.example.com bun start
 ```
 
+For development behind a proxy, set `PUBLIC_HOSTS` in `.env.local` and run `work restart web`. Browser HMR is disabled for that run because Bun's HMR server rejects non-local hostnames; server hot reload and manual browser refresh still work.
+
 Validate and run:
 
 ```sh
-cloudflared tunnel ingress validate
-cloudflared tunnel run herdr-terminal
+cloudflared tunnel --config ~/.cloudflared/herdr-terminal.yml ingress validate
+work run tunnel
 ```
 
 Cloudflare Tunnel supports WebSockets without an application change. When a network blocks WebSockets, the client falls back to SSE, and when SSE stalls too, to long polling. Cloudflare documents that Quick Tunnels do not support SSE, so on a Quick Tunnel the second fallback is the one that carries traffic. Prefer a named tunnel: it supports every transport and is the only kind you can put behind Cloudflare Access. See Cloudflare's [locally-managed tunnel guide](https://developers.cloudflare.com/tunnel/advanced/local-management/create-local-tunnel/), [configuration reference](https://developers.cloudflare.com/tunnel/advanced/local-management/configuration-file/), and [Tunnel FAQ](https://developers.cloudflare.com/cloudflare-one/faq/cloudflare-tunnels-faq/).
@@ -110,6 +112,8 @@ Cloudflare Tunnel supports WebSockets without an application change. When a netw
 ### Cloudflare Access
 
 Before using the public hostname, create a **Self-hosted** Access application for `herdr.example.com` under Zero Trust → Access controls → Applications. Add an Allow policy limited to your identity or identity-provider group. Cloudflare's [self-hosted application guide](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/self-hosted-public-app/) covers the dashboard flow.
+
+The current deployment uses `https://herdr.carlassmann.com/`. Cloudflare Access requires an email one-time PIN and an allowlist configured in Cloudflare, outside this repo.
 
 Do not add an Access bypass policy. This application intentionally has no account system; anyone who reaches it can control Herdr and therefore a local terminal.
 
