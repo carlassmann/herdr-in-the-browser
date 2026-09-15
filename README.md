@@ -137,7 +137,10 @@ sequences arrive as they would from a native window. Option acts as Alt, like
 
 When an application enables mouse reporting, clicks, taps, drags, and wheel
 events are encoded as terminal cell events. Hold Shift to bypass reporting and
-select text, as in Ghostty.
+select text, as in Ghostty. Herdr's own copy lands in the browser clipboard:
+sessions run with `SSH_TTY` set, which makes Herdr emit `OSC 52` rather than
+write the host's clipboard, and the server forwards the text as a `clipboard`
+message. Tools inside the session that check `SSH_TTY` will see a remote login.
 
 On a touch device, tap the terminal to raise the keyboard. The **Keys** menu
 adds `Ctrl`, `Alt`, `Esc`, `Tab`, and arrows; `Ctrl` and `Alt` latch for the

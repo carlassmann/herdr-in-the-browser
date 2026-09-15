@@ -9,7 +9,7 @@ import { OrderedInput } from "./ordered-input";
 import { herdrCommand } from "./herdr";
 import { webTerminalConfigPath } from "./herdr-config";
 import { TerminalModeTracker } from "../shared/terminal-modes";
-import { TerminalAlertScanner } from "../shared/terminal-notifications";
+import { TerminalSidebandScanner } from "../shared/terminal-sideband";
 
 const MAX_REPLAY_BYTES = 1024 * 1024;
 
@@ -63,7 +63,7 @@ export class TerminalSession {
   private readonly listeners = new Set<Listener>();
   private readonly replay = new ReplayBuffer();
   private readonly modes = new TerminalModeTracker();
-  private readonly alerts = new TerminalAlertScanner();
+  private readonly sideband = new TerminalSidebandScanner();
   private running = true;
   readonly input = new OrderedInput((message) => this.receive(message));
 
@@ -74,10 +74,13 @@ export class TerminalSession {
 
     const configPath = webTerminalConfigPath();
     // The browser runs Ghostty's own renderer, and Herdr only hands its
-    // notifications to terminals it knows can show them.
+    // notifications to terminals it knows can show them. The person sits
+    // behind a browser, not at the host, so the session presents as an SSH
+    // login: Herdr then copies with OSC 52 instead of the host clipboard.
     const [file, ...command] = herdrCommand(args, {
       COLORTERM: "truecolor",
       TERM_PROGRAM: "ghostty",
+      SSH_TTY: "/dev/tty",
       ...(configPath ? { HERDR_CONFIG_PATH: configPath } : {}),
     });
 
@@ -92,9 +95,12 @@ export class TerminalSession {
       const cursor = this.replay.append(data);
       this.modes.observe(data);
       this.publish({ type: "output", data, cursor });
-      const alerts = this.alerts.scan(data);
-      for (let sent = 0; sent < alerts; sent++) {
-        this.publish({ type: "notify" });
+      for (const event of this.sideband.scan(data)) {
+        this.publish(
+          event.kind === "alert"
+            ? { type: "notify" }
+            : { type: "clipboard", text: event.text },
+        );
       }
     });
     this.process.onExit(() => {
