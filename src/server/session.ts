@@ -92,8 +92,9 @@ export class TerminalSession {
       const cursor = this.replay.append(data);
       this.modes.observe(data);
       this.publish({ type: "output", data, cursor });
-      for (const alert of this.alerts.scan(data)) {
-        this.publish({ type: "notify", alert });
+      const alerts = this.alerts.scan(data);
+      for (let sent = 0; sent < alerts; sent++) {
+        this.publish({ type: "notify" });
       }
     });
     this.process.onExit(() => {

@@ -3,18 +3,16 @@ const ESC = "\u001b";
 const STRING_TERMINATOR_TAIL = "\\";
 const LONGEST_PARTIAL_SEQUENCE = 4096;
 
-export type TerminalAlert =
-  { kind: "bell" } | { kind: "message"; title: string; body: string };
-
-// Desktop notifications reach the browser as OSC escape sequences the terminal
-// itself ignores: OSC 9 carries a single message, OSC 777 a title and a body.
-// A bell only rings outside such a sequence, where it is not a terminator.
+// Notifications reach the terminal as OSC escape sequences it does not render:
+// OSC 9 carries a single message, OSC 777 a title and a body. A bell only rings
+// outside such a sequence, where it is not a terminator.
 export class TerminalAlertScanner {
   private partialSequence = "";
 
-  scan(output: string): TerminalAlert[] {
+  // The browser only answers with a sound, so the alerts are counted, not read.
+  scan(output: string): number {
     const text = this.partialSequence + output;
-    const alerts: TerminalAlert[] = [];
+    let alerts = 0;
     let sequenceStart = this.partialSequence ? 0 : -1;
     this.partialSequence = "";
 
@@ -25,7 +23,7 @@ export class TerminalAlertScanner {
         (character === ESC && text[index + 1] === STRING_TERMINATOR_TAIL);
 
       if (sequenceStart === -1) {
-        if (character === BEL) alerts.push({ kind: "bell" });
+        if (character === BEL) alerts += 1;
         else if (character === ESC && text[index + 1] === "]") {
           sequenceStart = index;
           index += 1;
@@ -34,8 +32,7 @@ export class TerminalAlertScanner {
       }
       if (!terminated) continue;
 
-      const alert = parseStringSequence(text.slice(sequenceStart + 2, index));
-      if (alert) alerts.push(alert);
+      if (isNotification(text.slice(sequenceStart + 2, index))) alerts += 1;
       if (character === ESC) index += 1;
       sequenceStart = -1;
     }
@@ -54,15 +51,8 @@ export class TerminalAlertScanner {
   }
 }
 
-function parseStringSequence(payload: string): TerminalAlert | undefined {
+function isNotification(payload: string): boolean {
   const [command = "", ...rest] = payload.split(";");
-  if (command === "9") {
-    const title = rest.join(";");
-    return title ? { kind: "message", title, body: "" } : undefined;
-  }
-  if (command === "777" && rest[0] === "notify") {
-    const [, title = "", ...body] = rest;
-    return title ? { kind: "message", title, body: body.join(";") } : undefined;
-  }
-  return undefined;
+  if (command === "9") return rest.join(";").length > 0;
+  return command === "777" && rest[0] === "notify" && Boolean(rest[1]);
 }

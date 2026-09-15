@@ -1,6 +1,8 @@
 {
-  "name": "herdr-web-terminal",
+  "name": "herdr-terminal",
   "version": "0.1.0",
+  "description": "A web terminal for Herdr that mirrors your Ghostty configuration, reachable through a Cloudflare Tunnel.",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {

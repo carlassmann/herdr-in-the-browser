@@ -6,46 +6,42 @@ const ESC = "\u001b";
 
 describe("TerminalAlertScanner", () => {
   test("reports a standalone bell", () => {
-    expect(new TerminalAlertScanner().scan(`done${BEL}`)).toEqual([
-      { kind: "bell" },
-    ]);
+    expect(new TerminalAlertScanner().scan(`done${BEL}`)).toBe(1);
   });
 
   test("ignores the bell that terminates a window title", () => {
     expect(
-      new TerminalAlertScanner().scan(`${ESC}]0;cbook: ~${BEL}prompt`),
-    ).toEqual([]);
+      new TerminalAlertScanner().scan(`${ESC}]0;host: ~${BEL}prompt`),
+    ).toBe(0);
   });
 
-  test("reads an OSC 9 notification", () => {
+  test("counts an OSC 9 notification", () => {
     expect(
       new TerminalAlertScanner().scan(`${ESC}]9;agent ready: hello${BEL}`),
-    ).toEqual([{ kind: "message", title: "agent ready: hello", body: "" }]);
+    ).toBe(1);
   });
 
-  test("reads an OSC 777 notification closed by a string terminator", () => {
+  test("counts an OSC 777 notification closed by a string terminator", () => {
     expect(
       new TerminalAlertScanner().scan(`${ESC}]777;notify;Claude;done${ESC}\\`),
-    ).toEqual([{ kind: "message", title: "Claude", body: "done" }]);
+    ).toBe(1);
   });
 
   test("joins a notification split across chunks", () => {
     const scanner = new TerminalAlertScanner();
-    expect(scanner.scan(`${ESC}]9;agent`)).toEqual([]);
-    expect(scanner.scan(` ready${BEL}`)).toEqual([
-      { kind: "message", title: "agent ready", body: "" },
-    ]);
+    expect(scanner.scan(`${ESC}]9;agent`)).toBe(0);
+    expect(scanner.scan(` ready${BEL}`)).toBe(1);
   });
 
   test("keeps scanning after an unterminated sequence grows too long", () => {
     const scanner = new TerminalAlertScanner();
     scanner.scan(`${ESC}]9;${"x".repeat(5000)}`);
-    expect(scanner.scan(`${BEL}`)).toEqual([{ kind: "bell" }]);
+    expect(scanner.scan(`${BEL}`)).toBe(1);
   });
 
   test("ignores other OSC commands", () => {
-    expect(
-      new TerminalAlertScanner().scan(`${ESC}]8;;https://x${BEL}`),
-    ).toEqual([]);
+    expect(new TerminalAlertScanner().scan(`${ESC}]8;;https://x${BEL}`)).toBe(
+      0,
+    );
   });
 });

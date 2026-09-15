@@ -11,8 +11,6 @@ import { isTrustedRequest, parsePublicHosts } from "./request-origin";
 import { collectMessages } from "./long-poll";
 import { isClientMessage } from "./session";
 import { SessionManager } from "./session-manager";
-import { DiagnosticsStore } from "./diagnostics";
-import type { DiagnosticOperation } from "../shared/diagnostics";
 
 const host = "127.0.0.1";
 const port = Number(process.env.PORT ?? 8787);
@@ -22,7 +20,6 @@ const publicHosts = parsePublicHosts(process.env.PUBLIC_HOSTS);
 // Well under Cloudflare's 100 s proxy read timeout.
 const longPollTimeoutMs = 25_000;
 const sessions = new SessionManager();
-const diagnostics = new DiagnosticsStore();
 
 interface SocketData {
   sessionName: string;
@@ -56,38 +53,6 @@ const server = Bun.serve<SocketData>({
     "/terminal-180.png": staticFile("terminal-180.png", {
       "Content-Type": "image/png",
     }),
-    "/api/diagnostics": {
-      GET: guard((request: Request) =>
-        json(
-          diagnostics.snapshot(
-            new URL(request.url).searchParams.get("session") ?? undefined,
-          ),
-        ),
-      ),
-    },
-    "/api/session/:id/diagnostics": {
-      POST: guard(
-        async (request: BunRequest<"/api/session/:id/diagnostics">) => {
-          const raw = await request.text();
-          if (raw.length > 24_000)
-            return json({ error: "Report too large." }, 413);
-          try {
-            const body = JSON.parse(raw);
-            if (
-              !diagnostics.recordClient(
-                request.params.id,
-                body?.clientId,
-                body?.measurements,
-              )
-            )
-              return json({ error: "Invalid diagnostics." }, 400);
-            return new Response(null, { status: 204 });
-          } catch {
-            return json({ error: "Invalid diagnostics." }, 400);
-          }
-        },
-      ),
-    },
     "/api/appearance": {
       GET: guard(async () => json(await loadGhosttyAppearance())),
     },
@@ -192,83 +157,29 @@ const server = Bun.serve<SocketData>({
       }),
     },
     "/api/session/:id/poll": {
-      GET: guard(
-        timed("poll", async (request: BunRequest<"/api/session/:id/poll">) => {
-          const session = sessions.get(request.params.id);
-          if (!session) return json({ error: "Session not found." }, 404);
+      GET: guard(async (request: BunRequest<"/api/session/:id/poll">) => {
+        const session = sessions.get(request.params.id);
+        if (!session) return json({ error: "Session not found." }, 404);
 
-          const size = readSize(request);
-          if (size) session.receive({ type: "resize", ...size });
+        const size = readSize(request);
+        if (size) session.receive({ type: "resize", ...size });
 
-          const messages = await collectMessages(session, readCursor(request), {
+        return json({
+          messages: await collectMessages(session, readCursor(request), {
             timeoutMs: longPollTimeoutMs,
             signal: request.signal,
-          });
-          const response = json({ messages });
-          response.headers.set(
-            "X-Terminal-Output-Bytes",
-            String(
-              messages.reduce(
-                (bytes, message) =>
-                  bytes +
-                  (message.type === "output"
-                    ? Buffer.byteLength(message.data)
-                    : 0),
-                0,
-              ),
-            ),
-          );
-          return response;
-        }),
-      ),
-    },
-    "/api/session/:id/connection": {
-      POST: guard(
-        async (request: BunRequest<"/api/session/:id/connection">) => {
-          const body = (await readJson(request)) as
-            Record<string, unknown> | undefined;
-          if (
-            !body ||
-            !["websocket", "sse", "poll"].includes(String(body.transport)) ||
-            !["connecting", "connected", "disconnected"].includes(
-              String(body.state),
-            ) ||
-            (body.reason !== undefined &&
-              !["timeout", "closed", "error", "send-failed"].includes(
-                String(body.reason),
-              ))
-          )
-            return json({ error: "Invalid connection report." }, 400);
-          console.info(
-            "[connection]",
-            JSON.stringify({
-              at: new Date().toISOString(),
-              clientId:
-                typeof body.clientId === "string"
-                  ? body.clientId.slice(0, 64)
-                  : undefined,
-              session: request.params.id,
-              transport: body.transport,
-              state: body.state,
-              reason: body.reason,
-            }),
-          );
-          return new Response(null, { status: 204 });
-        },
-      ),
+          }),
+        });
+      }),
     },
     "/api/session/:id/input": {
-      POST: guard(
-        timed("input", (request: BunRequest<"/api/session/:id/input">) =>
-          receiveSessionMessage(request, "input"),
-        ),
+      POST: guard((request: BunRequest<"/api/session/:id/input">) =>
+        receiveSessionMessage(request, "input"),
       ),
     },
     "/api/session/:id/resize": {
-      POST: guard(
-        timed("resize", (request: BunRequest<"/api/session/:id/resize">) =>
-          receiveSessionMessage(request, "resize"),
-        ),
+      POST: guard((request: BunRequest<"/api/session/:id/resize">) =>
+        receiveSessionMessage(request, "resize"),
       ),
     },
     "/api/session/:id": {
@@ -326,7 +237,7 @@ const server = Bun.serve<SocketData>({
   },
 });
 
-console.log(`Herdr Web Terminal listening on http://${host}:${server.port}`);
+console.log(`Herdr Terminal listening on http://${host}:${server.port}`);
 
 function json(value: unknown, status = 200): Response {
   return Response.json(value, {
@@ -351,48 +262,6 @@ function guard<T extends Request, Args extends unknown[]>(
     )
       ? handler(request, ...args)
       : json({ error: "Untrusted request origin." }, 403);
-}
-
-function timed<T extends Request & { params: { id: string } }>(
-  operation: DiagnosticOperation,
-  handler: (request: T) => Response | Promise<Response>,
-) {
-  return async (request: T): Promise<Response> => {
-    const started = performance.now();
-    const clientId = request.headers.get("X-Terminal-Client") ?? "";
-    const id = request.headers.get("X-Terminal-Request") ?? "";
-    const transport = request.headers.get("X-Terminal-Transport") ?? "";
-    const report = request.headers.get("X-Terminal-Metrics");
-    if (report && report.length <= 8_000) {
-      try {
-        diagnostics.recordClient(
-          request.params.id,
-          clientId,
-          JSON.parse(report),
-        );
-      } catch {}
-    }
-    let status = 500;
-    try {
-      const response = await handler(request);
-      status = response.status;
-      response.headers.set(
-        "X-Terminal-Server-Ms",
-        (performance.now() - started).toFixed(2),
-      );
-      return response;
-    } finally {
-      diagnostics.recordServer(
-        request.params.id,
-        clientId,
-        id,
-        operation,
-        transport,
-        status,
-        performance.now() - started,
-      );
-    }
-  };
 }
 
 function fontRoute(variant: "regular" | "bold" | "italic" | "bold-italic") {

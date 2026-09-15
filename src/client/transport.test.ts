@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { resourcePhases, TransportDiagnostics } from "./diagnostics";
 import { ReconnectingTransport } from "./transport";
 
 const originalFetch = globalThis.fetch;
@@ -7,7 +6,6 @@ const originalLocation = globalThis.location;
 const originalWebSocket = globalThis.WebSocket;
 const originalEventSource = globalThis.EventSource;
 const originalWindow = globalThis.window;
-const originalObserver = globalThis.PerformanceObserver;
 
 const timers = new Map<number, () => void>();
 let nextTimer = 0;
@@ -29,7 +27,6 @@ afterEach(() => {
   globalThis.WebSocket = originalWebSocket;
   globalThis.EventSource = originalEventSource;
   globalThis.window = originalWindow;
-  globalThis.PerformanceObserver = originalObserver;
   timers.clear();
   FakeWebSocket.opened = [];
   FakeEventSource.opened = [];
@@ -414,132 +411,5 @@ describe("blocked networks", () => {
     advanceTimer();
     expect(urls).toEqual(["/api/session/demo/poll?cursor=42"]);
     transport.close();
-  });
-});
-
-describe("request diagnostics", () => {
-  test("waits for resource observations before piggybacking detailed phases", async () => {
-    let observe = (_list: { getEntries(): PerformanceEntry[] }) => {};
-    class Observer {
-      static supportedEntryTypes = ["resource"];
-      constructor(callback: typeof observe) {
-        observe = callback;
-      }
-      observe() {}
-      disconnect() {}
-    }
-    globalThis.PerformanceObserver =
-      Observer as unknown as typeof PerformanceObserver;
-    const headers: Headers[] = [];
-    let resource: PerformanceResourceTiming;
-    globalThis.fetch = (async (_url, init) => {
-      headers.push(new Headers(init?.headers));
-      const now = performance.now();
-      if (headers.length === 1)
-        resource = {
-          name: "http://localhost:8787/api/session/demo/input",
-          startTime: now,
-          requestStart: now,
-          responseStart: now,
-          responseEnd: now,
-          domainLookupStart: now,
-          domainLookupEnd: now,
-          connectStart: now,
-          connectEnd: now,
-          nextHopProtocol: "h2",
-        } as PerformanceResourceTiming;
-      return new Response(null, { status: 204 });
-    }) as typeof fetch;
-    const diagnostics = new TransportDiagnostics("/api/session/demo");
-    await diagnostics.request(
-      "input",
-      "poll",
-      "/api/session/demo/input",
-      {},
-      async () => {},
-    );
-    await diagnostics.request(
-      "poll",
-      "poll",
-      "/api/session/demo/poll",
-      {},
-      async () => {},
-    );
-    expect(JSON.parse(headers[1]!.get("X-Terminal-Metrics")!)).toEqual([]);
-    observe({ getEntries: () => [resource!] });
-    await diagnostics.request(
-      "poll",
-      "poll",
-      "/api/session/demo/poll",
-      {},
-      async () => {},
-    );
-    const reports = JSON.parse(headers[2]!.get("X-Terminal-Metrics")!);
-    expect(reports).toHaveLength(1);
-    expect(reports[0]).toMatchObject({
-      id: headers[0]!.get("X-Terminal-Request"),
-      protocol: "h2",
-      transferMs: 0,
-    });
-    diagnostics.close();
-  });
-
-  test("separates connection setup, first-byte wait, transfer, and browser work", () => {
-    expect(
-      resourcePhases(
-        {
-          startTime: 100,
-          requestStart: 130,
-          responseStart: 280,
-          responseEnd: 300,
-          domainLookupStart: 102,
-          domainLookupEnd: 107,
-          connectStart: 107,
-          connectEnd: 127,
-          nextHopProtocol: "h2",
-        },
-        310,
-      ),
-    ).toEqual({
-      setupMs: 30,
-      dnsMs: 5,
-      connectMs: 20,
-      firstByteMs: 150,
-      transferMs: 20,
-      afterResponseMs: 10,
-      protocol: "h2",
-    });
-  });
-  test("piggybacks completed timings on the next request without terminal contents", async () => {
-    const requests: Headers[] = [];
-    globalThis.fetch = (async (_url, init) => {
-      requests.push(new Headers(init?.headers));
-      return new Response(null, {
-        status: 204,
-        headers: { "X-Terminal-Server-Ms": "12.5" },
-      });
-    }) as typeof fetch;
-    const diagnostics = new TransportDiagnostics("/api/session/demo");
-    await diagnostics.request(
-      "input",
-      "poll",
-      "/input",
-      { method: "POST", body: "private terminal data" },
-      async () => {},
-      { queueMs: 75, batchSize: 4, inputBytes: 4 },
-    );
-    await diagnostics.request("poll", "poll", "/poll", {}, async () => {});
-    expect(requests).toHaveLength(2);
-    expect(requests[0]!.get("X-Terminal-Metrics")).toBeNull();
-    const [report] = JSON.parse(requests[1]!.get("X-Terminal-Metrics")!);
-    expect(report).toMatchObject({
-      id: requests[0]!.get("X-Terminal-Request"),
-      status: 204,
-      serverMs: 12.5,
-      queueMs: 75,
-      batchSize: 4,
-    });
-    expect(JSON.stringify(report)).not.toContain("private terminal data");
-    expect(requests[1]!.get("X-Terminal-Client")).toBe(diagnostics.clientId);
   });
 });

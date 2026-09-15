@@ -1,4 +1,3 @@
-import { TransportDiagnostics } from "./diagnostics";
 import type { ClientMessage, ServerMessage } from "../shared/protocol";
 
 export type TransportState = "connecting" | "connected" | "disconnected";
@@ -34,12 +33,7 @@ export class ReconnectingTransport implements Transport {
   private sseFailures = 0;
   private cursor = 0;
   private generation = 0;
-  private pending: Array<{
-    message: ClientMessage;
-    queuedAt: number;
-    batchSize: number;
-  }> = [];
-  private readonly diagnostics: TransportDiagnostics;
+  private pending: ClientMessage[] = [];
   private inFlight = 0;
   private sendTimer?: number;
   private lastSent = -Infinity;
@@ -50,11 +44,7 @@ export class ReconnectingTransport implements Transport {
   constructor(
     private readonly sessionId: string,
     private readonly callbacks: TransportCallbacks,
-  ) {
-    this.diagnostics = new TransportDiagnostics(
-      `/api/session/${encodeURIComponent(sessionId)}`,
-    );
-  }
+  ) {}
 
   connect(): void {
     this.close();
@@ -71,23 +61,14 @@ export class ReconnectingTransport implements Transport {
     const previous = this.pending.at(-1);
     if (
       message.type === "input" &&
-      previous?.message.type === "input" &&
-      previous.message.data.length + message.data.length <= 64 * 1024
+      previous?.type === "input" &&
+      previous.data.length + message.data.length <= 64 * 1024
     ) {
-      previous.message.data += message.data;
-      previous.batchSize += 1;
-    } else if (
-      message.type === "resize" &&
-      previous?.message.type === "resize"
-    ) {
-      previous.message = { ...message };
-      previous.batchSize += 1;
+      previous.data += message.data;
+    } else if (message.type === "resize" && previous?.type === "resize") {
+      this.pending[this.pending.length - 1] = { ...message };
     } else {
-      this.pending.push({
-        message: { ...message },
-        queuedAt: performance.now(),
-        batchSize: 1,
-      });
+      this.pending.push({ ...message });
     }
     this.flush();
   }
@@ -105,7 +86,7 @@ export class ReconnectingTransport implements Transport {
       this.socket?.readyState === WebSocket.OPEN
     ) {
       for (const queued of this.pending.splice(0))
-        this.socket.send(JSON.stringify(queued.message));
+        this.socket.send(JSON.stringify(queued));
       return;
     }
     const delay = 50 - (performance.now() - this.lastSent);
@@ -121,48 +102,32 @@ export class ReconnectingTransport implements Transport {
 
   private dispatch(): void {
     if (this.closed || this.inFlight >= 2) return;
-    const queued = this.pending.shift();
-    if (!queued) return;
-    const { message, queuedAt, batchSize } = queued;
+    const message = this.pending.shift();
+    if (!message) return;
     const generation = this.generation;
     this.lastSent = performance.now();
     this.inFlight += 1;
     void (async () => {
       try {
         const endpoint = message.type === "input" ? "input" : "resize";
-        await this.diagnostics.request(
-          endpoint,
-          this.kind,
-          this.sessionUrl(endpoint),
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Terminal-Input-Stream": this.inputStream,
-              "X-Terminal-Input-Sequence": String(this.inputSequence++),
-            },
-            body: JSON.stringify(message),
-            signal: AbortSignal.any([
-              this.abortController.signal,
-              AbortSignal.timeout(10_000),
-            ]),
+        const response = await fetch(this.sessionUrl(endpoint), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Terminal-Input-Stream": this.inputStream,
+            "X-Terminal-Input-Sequence": String(this.inputSequence++),
           },
-          async (response) => {
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          },
-          {
-            queueMs: performance.now() - queuedAt,
-            batchSize,
-            inputBytes:
-              message.type === "input"
-                ? new TextEncoder().encode(message.data).length
-                : undefined,
-          },
-        );
+          body: JSON.stringify(message),
+          signal: AbortSignal.any([
+            this.abortController.signal,
+            AbortSignal.timeout(10_000),
+          ]),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
       } catch {
         if (!this.closed && generation === this.generation) {
           this.close();
-          this.reportState("disconnected", "send-failed");
+          this.callbacks.onState("disconnected");
           this.scheduleReconnect(() => this.connect());
         }
       } finally {
@@ -175,7 +140,6 @@ export class ReconnectingTransport implements Transport {
   }
 
   close(): void {
-    this.diagnostics.close();
     this.closed = true;
     this.generation += 1;
     this.pending = [];
@@ -197,7 +161,7 @@ export class ReconnectingTransport implements Transport {
   private connectWebSocket(): void {
     if (this.closed) return;
     this.kind = "websocket";
-    this.reportState("connecting");
+    this.callbacks.onState("connecting");
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(
       `${protocol}//${location.host}${this.sessionUrl("ws")}?${this.connectionQuery()}`,
@@ -211,7 +175,7 @@ export class ReconnectingTransport implements Transport {
       failed = true;
       window.clearTimeout(this.connectionTimer);
       socket.close();
-      this.reportState("disconnected", reason);
+      this.callbacks.onState("disconnected");
       if (!received) this.websocketFailures += 1;
       if (this.websocketFailures >= FAILURES_BEFORE_FALLBACK) this.connectSse();
       else this.scheduleReconnect(() => this.connectWebSocket());
@@ -227,7 +191,7 @@ export class ReconnectingTransport implements Transport {
         window.clearTimeout(this.connectionTimer);
         this.retry = 0;
         this.websocketFailures = 0;
-        this.reportState("connected");
+        this.callbacks.onState("connected");
       }
       this.deliver(String(event.data));
     });
@@ -238,7 +202,7 @@ export class ReconnectingTransport implements Transport {
   private connectSse(): void {
     if (this.closed) return;
     this.kind = "sse";
-    this.reportState("connecting");
+    this.callbacks.onState("connecting");
     const events = new EventSource(
       `${this.sessionUrl("events")}?${this.connectionQuery()}`,
     );
@@ -252,7 +216,7 @@ export class ReconnectingTransport implements Transport {
       failed = true;
       events.close();
       window.clearTimeout(this.connectionTimer);
-      this.reportState("disconnected", reason);
+      this.callbacks.onState("disconnected");
       if (!received) this.sseFailures += 1;
       if (
         (received && reason === "timeout") ||
@@ -273,7 +237,7 @@ export class ReconnectingTransport implements Transport {
         window.clearTimeout(this.connectionTimer);
         this.retry = 0;
         this.sseFailures = 0;
-        this.reportState("connected");
+        this.callbacks.onState("connected");
       }
       window.clearTimeout(this.connectionTimer);
       this.connectionTimer = window.setTimeout(
@@ -288,7 +252,7 @@ export class ReconnectingTransport implements Transport {
   private connectLongPoll(): void {
     if (this.closed) return;
     this.kind = "poll";
-    this.reportState("connecting");
+    this.callbacks.onState("connecting");
     const generation = this.generation;
     const signal = this.abortController.signal;
     const isCurrent = () => !this.closed && generation === this.generation;
@@ -298,26 +262,19 @@ export class ReconnectingTransport implements Transport {
       let connected = false;
       try {
         while (isCurrent()) {
-          let messages: ServerMessage[] = [];
-          await this.diagnostics.request(
-            "poll",
-            this.kind,
-            `${this.sessionUrl("poll")}?${query}`,
-            {
-              signal: AbortSignal.any([signal, AbortSignal.timeout(35_000)]),
-              cache: "no-store",
-            },
-            async (response) => {
-              if (!response.ok)
-                throw new Error(`Poll failed: ${response.status}`);
-              messages = (await response.json()).messages;
-            },
-          );
+          const response = await fetch(`${this.sessionUrl("poll")}?${query}`, {
+            signal: AbortSignal.any([signal, AbortSignal.timeout(35_000)]),
+            cache: "no-store",
+          });
+          if (!response.ok) throw new Error(`Poll failed: ${response.status}`);
+          const { messages } = (await response.json()) as {
+            messages: ServerMessage[];
+          };
           if (!isCurrent()) return;
           if (!connected) {
             connected = true;
             this.retry = 0;
-            this.reportState("connected");
+            this.callbacks.onState("connected");
           }
           for (const message of messages) this.accept(message);
           query = new URLSearchParams({
@@ -326,30 +283,10 @@ export class ReconnectingTransport implements Transport {
         }
       } catch {
         if (!isCurrent()) return;
-        this.reportState("disconnected");
+        this.callbacks.onState("disconnected");
         this.scheduleReconnect(() => this.connectLongPoll());
       }
     })();
-  }
-
-  private reportState(state: TransportState, reason?: string): void {
-    this.callbacks.onState(state);
-    navigator.sendBeacon?.(
-      this.sessionUrl("connection"),
-      new Blob(
-        [
-          JSON.stringify({
-            clientId: this.diagnostics.clientId,
-            transport: this.kind,
-            state,
-            reason,
-          }),
-        ],
-        {
-          type: "application/json",
-        },
-      ),
-    );
   }
 
   private sessionUrl(endpoint: string): string {
