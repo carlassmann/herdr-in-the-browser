@@ -9,7 +9,7 @@ on it, a phone. The terminal is `ghostty-web` (libghostty compiled to WASM)
 configured from your own `ghostty` config, so the fonts, colors, padding, and
 key handling match the Ghostty window on the host.
 
-A Bun server binds to `127.0.0.1`, owns the PTYs, and serves a React PWA. It
+A Bun server binds to `127.0.0.1`, owns the PTYs, and serves a PWA. It
 talks to the browser over a WebSocket, and falls back to SSE and then long
 polling where those are blocked or stalled. Nothing listens on a public
 interface; `cloudflared` makes the outbound connection and Cloudflare Access
@@ -28,7 +28,11 @@ bun run check
 ```
 
 One Bun process bundles the frontend and serves the API. There is no separate
-dev server, proxy, or routing framework.
+dev server, proxy, or routing framework. The frontend has no UI framework
+either: the screens are a session picker, a header, and a canvas the terminal
+owns, so they are plain TypeScript building DOM nodes. Dropping React,
+`@base-ui`, and the icon package cut the client bundle from 293 KB to 194 KB
+gzipped, which is the load that has to cross the tunnel first.
 
 ## Cloudflare Tunnel
 

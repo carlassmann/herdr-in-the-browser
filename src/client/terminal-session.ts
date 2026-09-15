@@ -1,222 +1,203 @@
-import { useEffect, useRef, useState } from "react";
 import { FitAddon, init, Terminal } from "ghostty-web";
 import type { TerminalAppearance, TerminalTheme } from "../shared/protocol";
+import { TerminalModeTracker } from "../shared/terminal-modes";
 import {
   applyAppearance,
   loadAppearance,
   resolveAppearance,
   watchSystemAppearance,
 } from "./appearance";
-import { TerminalModeTracker } from "../shared/terminal-modes";
+import { el } from "./dom";
 import {
   encodeModifiedInput,
   TerminalKeyEncoder,
   type Modifiers,
 } from "./keyboard";
 import {
+  playNotificationSound,
+  unlockNotificationSound,
+} from "./notification-sound";
+import type { TerminalControls } from "./terminal-controls";
+import {
   createWheelTickAccumulator,
   encodeTerminalMouse,
   wheelDeltaMode,
 } from "./terminal-mouse";
 import { attachPaddingLayout } from "./terminal-padding";
-import { useTerminalControls } from "./TerminalControls";
-import {
-  playNotificationSound,
-  unlockNotificationSound,
-} from "./notification-sound";
 import { ReconnectingTransport, type TransportState } from "./transport";
 
 const ghosttyReady = init();
 
 export type SessionState = TransportState | "exited";
 
-interface TerminalViewProps {
+interface TerminalSessionOptions {
   sessionId: string;
+  controls: TerminalControls;
   onConnectionChange(state: SessionState): void;
 }
 
-export function TerminalView({
-  sessionId,
-  onConnectionChange,
-}: TerminalViewProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<Terminal | undefined>(undefined);
-  const transportRef = useRef<ReconnectingTransport | undefined>(undefined);
-  const modifiersRef = useRef({ control: false, alt: false });
-  const [ready, setReady] = useState(false);
-  const { modifiers, setModifiers, registerInputHandler } =
-    useTerminalControls();
+export function attachTerminal(
+  shell: HTMLElement,
+  { sessionId, controls, onConnectionChange }: TerminalSessionOptions,
+): () => void {
+  const container = el("div", {
+    class: "terminal-canvas",
+    "aria-label": `Terminal ${sessionId}`,
+  });
+  shell.dataset.ready = "false";
+  shell.append(container);
 
-  useEffect(() => {
-    modifiersRef.current = modifiers;
-    terminalRef.current?.focus();
-  }, [modifiers]);
+  let terminal: Terminal | undefined;
+  let transport: ReconnectingTransport | undefined;
+  let disposed = false;
+  const disposals: Array<() => void> = [];
+  const disposeWithEffect = (dispose: () => void) => {
+    if (disposed) dispose();
+    else disposals.push(dispose);
+  };
 
-  useEffect(
-    () =>
-      registerInputHandler((data) => {
-        transportRef.current?.send({ type: "input", data });
-        terminalRef.current?.focus();
-      }),
-    [registerInputHandler],
+  const focusTerminal = () => terminal?.focus();
+  shell.addEventListener("pointerdown", focusTerminal);
+  disposeWithEffect(controls.onModifiersChange(focusTerminal));
+  disposeWithEffect(
+    controls.setInputHandler((data) => {
+      transport?.send({ type: "input", data });
+      focusTerminal();
+    }),
   );
 
-  useEffect(() => {
-    let disposed = false;
-    const disposals: Array<() => void> = [];
-    const disposeWithEffect = (dispose: () => void) => {
-      if (disposed) dispose();
-      else disposals.push(dispose);
-    };
-    setReady(false);
+  void (async () => {
+    const [, appearance] = await Promise.all([ghosttyReady, loadAppearance()]);
+    if (disposed) return;
+    const fontFamily = await loadConfiguredFont(appearance);
+    if (disposed) return;
+    applyAppearance(appearance);
+    const { theme } = resolveAppearance(appearance);
 
-    void (async () => {
-      const [, appearance] = await Promise.all([
-        ghosttyReady,
-        loadAppearance(),
-      ]);
-      if (disposed || !containerRef.current) return;
-      const fontFamily = await loadConfiguredFont(appearance);
-      if (disposed || !containerRef.current) return;
-      applyAppearance(appearance);
-      const { theme } = resolveAppearance(appearance);
-
-      const terminal = new Terminal({
-        cursorBlink: appearance.cursorBlink,
-        cursorStyle: appearance.cursorStyle,
-        fontFamily,
-        fontSize: appearance.fontSize,
-        cellWidthAdjustment: appearance.cellWidthAdjustment,
-        cellHeightAdjustment: appearance.cellHeightAdjustment,
-        scrollback: 5000,
-        theme,
-      });
-      disposeWithEffect(() => terminal.dispose());
-      const fitAddon = new FitAddon();
-      disposeWithEffect(() => fitAddon.dispose());
-      terminal.loadAddon(fitAddon);
-      await terminal.open(containerRef.current);
-      if (disposed) return;
-      terminalRef.current = terminal;
-      const paddingLayout = attachPaddingLayout(
-        containerRef.current,
-        terminal,
-        appearance,
-        theme,
-      );
-      disposeWithEffect(() => paddingLayout.dispose());
-      if (appearance.colorScheme === "system") {
-        disposeWithEffect(
-          watchSystemAppearance(() => {
-            applyAppearance(appearance);
-            const { theme: nextTheme } = resolveAppearance(appearance);
-            repaintWithTheme(terminal, nextTheme);
-            paddingLayout.setTheme(nextTheme);
-          }),
-        );
-      }
-
-      let exited = false;
-      const modes = new TerminalModeTracker();
-      const transport = new ReconnectingTransport(sessionId, {
-        getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
-        onMessage(message) {
-          if (message.type === "output") {
-            modes.observe(message.data);
-            terminal.write(message.data);
-          } else if (message.type === "sync") {
-            if (message.reset) {
-              terminal.reset();
-              modes.reset();
-            }
-          } else if (message.type === "notify") {
-            playNotificationSound();
-          } else if (!message.running) {
-            exited = true;
-            onConnectionChange("exited");
-            transport.close();
-          }
-        },
-        onState(state) {
-          if (!exited) onConnectionChange(state);
-        },
-      });
-      disposeWithEffect(() => transport.close());
-      disposeWithEffect(unlockNotificationSound());
-      transportRef.current = transport;
-
-      const releaseModifiers = () => {
-        modifiersRef.current = { control: false, alt: false };
-        setModifiers({ control: false, alt: false });
-      };
-      const inputSubscription = terminal.onData((data) => {
-        const modifiers = modifiersRef.current;
-        const transformed = encodeModifiedInput(data, modifiers);
-        if (modifiers.control || modifiers.alt) releaseModifiers();
-        transport.send({ type: "input", data: transformed });
-      });
-      disposeWithEffect(() => inputSubscription.dispose());
+    const openedTerminal = new Terminal({
+      cursorBlink: appearance.cursorBlink,
+      cursorStyle: appearance.cursorStyle,
+      fontFamily,
+      fontSize: appearance.fontSize,
+      cellWidthAdjustment: appearance.cellWidthAdjustment,
+      cellHeightAdjustment: appearance.cellHeightAdjustment,
+      scrollback: 5000,
+      theme,
+    });
+    disposeWithEffect(() => openedTerminal.dispose());
+    const fitAddon = new FitAddon();
+    disposeWithEffect(() => fitAddon.dispose());
+    openedTerminal.loadAddon(fitAddon);
+    await openedTerminal.open(container);
+    if (disposed) return;
+    terminal = openedTerminal;
+    const paddingLayout = attachPaddingLayout(
+      container,
+      openedTerminal,
+      appearance,
+      theme,
+    );
+    disposeWithEffect(() => paddingLayout.dispose());
+    if (appearance.colorScheme === "system") {
       disposeWithEffect(
-        attachKeyboardInput(containerRef.current, terminal, modes, {
-          heldModifiers: () => modifiersRef.current,
-          releaseModifiers,
-          send: (data) => transport.send({ type: "input", data }),
+        watchSystemAppearance(() => {
+          applyAppearance(appearance);
+          const { theme: nextTheme } = resolveAppearance(appearance);
+          repaintWithTheme(openedTerminal, nextTheme);
+          paddingLayout.setTheme(nextTheme);
         }),
       );
-      const resizeSubscription = terminal.onResize(({ cols, rows }) =>
-        transport.send({ type: "resize", cols, rows }),
-      );
-      disposeWithEffect(() => resizeSubscription.dispose());
-      disposeWithEffect(
-        attachMouseReporting(containerRef.current, terminal, (data) =>
-          transport.send({ type: "input", data }),
-        ),
-      );
-      fitAddon.fit();
-      fitAddon.observeResize();
-      transport.connect();
-      if (disposed) return;
-      setReady(true);
-      terminal.focus();
-    })().catch(() => {
-      if (!disposed) onConnectionChange("disconnected");
+    }
+
+    let exited = false;
+    const modes = new TerminalModeTracker();
+    const openedTransport = new ReconnectingTransport(sessionId, {
+      getSize: () => ({
+        cols: openedTerminal.cols,
+        rows: openedTerminal.rows,
+      }),
+      onMessage(message) {
+        if (message.type === "output") {
+          modes.observe(message.data);
+          openedTerminal.write(message.data);
+        } else if (message.type === "sync") {
+          if (message.reset) {
+            openedTerminal.reset();
+            modes.reset();
+          }
+        } else if (message.type === "notify") {
+          playNotificationSound();
+        } else if (!message.running) {
+          exited = true;
+          onConnectionChange("exited");
+          openedTransport.close();
+        }
+      },
+      onState(state) {
+        if (!exited) onConnectionChange(state);
+      },
     });
+    disposeWithEffect(() => openedTransport.close());
+    disposeWithEffect(unlockNotificationSound());
+    transport = openedTransport;
 
-    const reconnect = () => {
-      if (navigator.onLine && !disposed) {
-        transportRef.current?.close();
-        transportRef.current?.connect();
-      }
-    };
-    window.addEventListener("online", reconnect);
-    const reconnectWhenVisible = () => {
-      if (document.visibilityState === "visible") reconnect();
-    };
-    document.addEventListener("visibilitychange", reconnectWhenVisible);
+    const releaseModifiers = () =>
+      controls.setModifiers({ control: false, alt: false });
+    const inputSubscription = openedTerminal.onData((data) => {
+      const modifiers = controls.modifiers;
+      const transformed = encodeModifiedInput(data, modifiers);
+      if (modifiers.control || modifiers.alt) releaseModifiers();
+      openedTransport.send({ type: "input", data: transformed });
+    });
+    disposeWithEffect(() => inputSubscription.dispose());
+    disposeWithEffect(
+      attachKeyboardInput(container, openedTerminal, modes, {
+        heldModifiers: () => controls.modifiers,
+        releaseModifiers,
+        send: (data) => openedTransport.send({ type: "input", data }),
+      }),
+    );
+    const resizeSubscription = openedTerminal.onResize(({ cols, rows }) =>
+      openedTransport.send({ type: "resize", cols, rows }),
+    );
+    disposeWithEffect(() => resizeSubscription.dispose());
+    disposeWithEffect(
+      attachMouseReporting(container, openedTerminal, (data) =>
+        openedTransport.send({ type: "input", data }),
+      ),
+    );
+    fitAddon.fit();
+    fitAddon.observeResize();
+    openedTransport.connect();
+    if (disposed) return;
+    shell.dataset.ready = "true";
+    openedTerminal.focus();
+  })().catch(() => {
+    if (!disposed) onConnectionChange("disconnected");
+  });
 
-    return () => {
-      disposed = true;
-      window.removeEventListener("online", reconnect);
-      document.removeEventListener("visibilitychange", reconnectWhenVisible);
-      while (disposals.length) disposals.pop()?.();
-      transportRef.current = undefined;
-      terminalRef.current = undefined;
-    };
-  }, [sessionId, onConnectionChange, setModifiers]);
+  const reconnect = () => {
+    if (navigator.onLine && !disposed) {
+      transport?.close();
+      transport?.connect();
+    }
+  };
+  const reconnectWhenVisible = () => {
+    if (document.visibilityState === "visible") reconnect();
+  };
+  window.addEventListener("online", reconnect);
+  document.addEventListener("visibilitychange", reconnectWhenVisible);
 
-  return (
-    <div
-      className="terminal-shell"
-      data-ready={ready}
-      onPointerDown={() => terminalRef.current?.focus()}
-    >
-      <div
-        ref={containerRef}
-        className="terminal-canvas"
-        aria-label={`Terminal ${sessionId}`}
-      />
-    </div>
-  );
+  return () => {
+    disposed = true;
+    shell.removeEventListener("pointerdown", focusTerminal);
+    window.removeEventListener("online", reconnect);
+    document.removeEventListener("visibilitychange", reconnectWhenVisible);
+    while (disposals.length) disposals.pop()?.();
+    transport = undefined;
+    terminal = undefined;
+    container.remove();
+  };
 }
 
 interface KeyboardInputSink {
@@ -230,7 +211,7 @@ interface KeyboardInputSink {
 // bracketing. Take over key, paste, and focus events and encode them the way
 // native Ghostty does.
 function attachKeyboardInput(
-  container: HTMLDivElement,
+  container: HTMLElement,
   terminal: Terminal,
   modes: TerminalModeTracker,
   sink: KeyboardInputSink,
@@ -280,7 +261,7 @@ function attachKeyboardInput(
 }
 
 function attachMouseReporting(
-  container: HTMLDivElement,
+  container: HTMLElement,
   terminal: Terminal,
   send: (data: string) => void,
 ): () => void {

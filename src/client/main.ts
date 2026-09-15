@@ -1,6 +1,4 @@
-import React from "react";
-import { createRoot } from "react-dom/client";
-import { App } from "./App";
+import { startApp } from "./app";
 import "./styles.css";
 
 const loopback = ["localhost", "127.0.0.1", "::1"].includes(location.hostname);
@@ -30,8 +28,4 @@ if (window.visualViewport) {
   window.addEventListener("resize", syncViewport);
 }
 
-createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-);
+startApp(document.getElementById("root")!);
