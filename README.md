@@ -2,7 +2,7 @@
 
 Herdr. In your browser.
 
-![Herdr running in a mobile browser](./docs/herdr-terminal-demo.gif)
+![Herdr running in a mobile browser](./docs/herdr-in-browser.gif)
 
 Open the [Herdr](https://herdr.dev) sessions on your machine from a browser.
 Start one, pick one up, or leave it running and return later. That's it.
