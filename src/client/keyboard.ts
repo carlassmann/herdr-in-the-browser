@@ -47,12 +47,14 @@ export class TerminalKeyEncoder {
   // Returns undefined when the browser should keep the key (copy and paste
   // shortcuts, Command combinations), otherwise the bytes for the pty.
   encode(
-    press: KeyPress,
+    original: KeyPress,
     held: Modifiers,
     protocol: KeyboardProtocol,
   ): string | undefined {
-    if (isBrowserShortcut(press)) return undefined;
-    if (press.key === "Dead") return "";
+    if (isBrowserShortcut(original)) return undefined;
+
+    const press = resolveDeadKey(original);
+    if (press === undefined) return "";
 
     const text = keyText(press.key);
     const baseText = text !== undefined ? baseCharacter(press) : undefined;
@@ -70,6 +72,7 @@ export class TerminalKeyEncoder {
       action: press.repeat ? KeyAction.REPEAT : KeyAction.PRESS,
       key: keyCodeMap[press.code] ?? Key.UNIDENTIFIED,
       mods: modifierFlags(press, held),
+      consumedMods: consumedShift(press, utf8, unshifted),
       utf8,
       unshiftedCodepoint: unshifted?.codePointAt(0),
     });
@@ -106,6 +109,19 @@ function isBrowserShortcut(press: KeyPress): boolean {
   return commandOnly || paste;
 }
 
+// Layouts like US-International turn ' and " into dead keys that only produce
+// a character once the next key decides which accent to compose. A terminal
+// wants the quote itself, so such a key resolves to the character printed on
+// it and the composition never starts. Option is how macOS reaches characters
+// its layout has no key for, so a dead key held with it keeps composing and
+// option+u a still types ä.
+function resolveDeadKey(press: KeyPress): KeyPress | undefined {
+  if (press.key !== "Dead") return press;
+  if (press.altKey) return undefined;
+  const literal = baseCharacter(press);
+  return literal === undefined ? undefined : { ...press, key: literal };
+}
+
 function keyText(key: string): string | undefined {
   return [...key].length === 1 ? key : undefined;
 }
@@ -117,6 +133,23 @@ function modifierFlags(press: KeyPress, held: Modifiers): Mods {
   if (press.altKey || held.alt) mods |= Mods.ALT;
   if (press.metaKey) mods |= Mods.SUPER;
   return mods;
+}
+
+// A shifted character like " or ! is text the layout already produced, so
+// Shift is spent and the kitty protocol must report the character itself
+// instead of an unshifted key plus a Shift modifier.
+function consumedShift(
+  press: KeyPress,
+  text: string | undefined,
+  unshifted: string | undefined,
+): Mods {
+  const shiftProducedText =
+    press.shiftKey &&
+    !press.ctrlKey &&
+    !press.metaKey &&
+    text !== undefined &&
+    text !== unshifted;
+  return shiftProducedText ? Mods.SHIFT : Mods.NONE;
 }
 
 function baseCharacter(press: KeyPress): string | undefined {

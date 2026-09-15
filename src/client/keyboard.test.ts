@@ -68,9 +68,23 @@ describe("terminal key encoding", () => {
       `${ESC}[27u`,
     );
     expect(keys.encode(press("a", "KeyA"), noneHeld, kitty)).toBe("a");
-    expect(keys.encode(press("A", "KeyA", "shift"), noneHeld, kitty)).toBe(
-      `${ESC}[97;2u`,
-    );
+  });
+
+  // Shift is spent producing " or !, so the character travels as text. Report
+  // it as an unshifted key plus a Shift modifier and the application has to
+  // guess the layout, which is how quotes went missing.
+  test("sends characters the layout shifted as plain text", () => {
+    for (const protocol of [legacy, { ...legacy, kittyFlags: 7 }]) {
+      expect(keys.encode(press("A", "KeyA", "shift"), noneHeld, protocol)).toBe(
+        "A",
+      );
+      expect(
+        keys.encode(press('"', "Quote", "shift"), noneHeld, protocol),
+      ).toBe('"');
+      expect(
+        keys.encode(press("!", "Digit1", "shift"), noneHeld, protocol),
+      ).toBe("!");
+    }
   });
 
   test("reports every key as an escape code when asked to", () => {
@@ -120,7 +134,19 @@ describe("terminal key encoding", () => {
 
   test("passes through characters from layouts the key map does not know", () => {
     expect(keys.encode(press("é", ""), noneHeld, legacy)).toBe("é");
-    expect(keys.encode(press("Dead", "BracketLeft"), noneHeld, legacy)).toBe(
+    expect(keys.encode(press("Dead", ""), noneHeld, legacy)).toBe("");
+  });
+
+  test("types the character a dead key is printed with", () => {
+    expect(keys.encode(press("Dead", "Quote"), noneHeld, legacy)).toBe("'");
+    expect(keys.encode(press("Dead", "Quote", "shift"), noneHeld, legacy)).toBe(
+      '"',
+    );
+    expect(keys.encode(press("Dead", "Backquote"), noneHeld, legacy)).toBe("`");
+  });
+
+  test("leaves Option dead keys composing so option+u a still types ä", () => {
+    expect(keys.encode(press("Dead", "KeyU", "alt"), noneHeld, legacy)).toBe(
       "",
     );
   });
