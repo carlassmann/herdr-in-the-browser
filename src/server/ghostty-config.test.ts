@@ -1,4 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { configuredThemeName, parseGhosttyConfig } from "./ghostty-config";
 
 describe("Ghostty appearance", () => {
@@ -70,5 +79,42 @@ describe("Ghostty appearance", () => {
         "dark",
       ),
     ).toBe("Github Dark Default");
+  });
+});
+
+describe("Ghostty config reloading", () => {
+  test("reads Ghostty again only after the config file changes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "ghostty-config-"));
+    const config = join(directory, "config");
+    const reads = join(directory, "reads");
+    const ghostty = join(directory, "ghostty");
+    writeFileSync(config, "font-size = 16\n");
+    writeFileSync(
+      ghostty,
+      `#!/bin/sh\necho read >> ${reads}\ncat "$GHOSTTY_CONFIG_FILE"\n`,
+      { mode: 0o755 },
+    );
+    process.env.GHOSTTY_BIN = ghostty;
+    process.env.GHOSTTY_CONFIG_FILE = config;
+
+    try {
+      const { loadGhosttyAppearance } = (await import(
+        `./ghostty-config?${directory}`
+      )) as typeof import("./ghostty-config");
+
+      expect((await loadGhosttyAppearance()).fontSize).toBe(16);
+      expect((await loadGhosttyAppearance()).fontSize).toBe(16);
+      expect(readFileSync(reads, "utf8").trim().split("\n")).toHaveLength(1);
+
+      writeFileSync(config, "font-size = 22\n");
+      utimesSync(config, new Date(), new Date(Date.now() + 1000));
+
+      expect((await loadGhosttyAppearance()).fontSize).toBe(22);
+      expect(readFileSync(reads, "utf8").trim().split("\n")).toHaveLength(2);
+    } finally {
+      delete process.env.GHOSTTY_BIN;
+      delete process.env.GHOSTTY_CONFIG_FILE;
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

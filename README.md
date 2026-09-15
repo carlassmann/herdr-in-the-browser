@@ -102,8 +102,13 @@ whether it was started from a plain shell or from inside Herdr.
 
 ## Ghostty configuration
 
-The server reads `ghostty +show-config` once per process (restart it after
-editing the config). The terminal applies the regular and bold faces, font size, cell width/height
+The server reads `ghostty +show-config` and reads it again once the config or a
+theme file it used has been touched, so editing the config costs a browser
+reload rather than a server restart. Files pulled in through `include` are
+invisible to that check, since `ghostty +show-config` resolves them and reports
+only the result; touching the main config picks them up.
+
+The terminal applies the regular and bold faces, font size, cell width/height
 adjustments, window padding including `window-padding-balance` and
 `window-padding-color = extend`, cursor style and blink, foreground,
 background, selection colors, and the first 16 palette colors. Paired

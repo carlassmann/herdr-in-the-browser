@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import type {
   MetricAdjustment,
@@ -48,6 +48,8 @@ const fallback: TerminalAppearance = {
 let appearancePromise: Promise<TerminalAppearance> | undefined;
 let cachedAppearance: TerminalAppearance | undefined;
 let effectiveConfigPromise: Promise<string | undefined> | undefined;
+let loadedStamp: string | undefined;
+const themeSources = new Set<string>();
 const fontPromises = new Map<
   FontVariant,
   Promise<{ file: Bun.BunFile; contentType: string } | undefined>
@@ -55,10 +57,12 @@ const fontPromises = new Map<
 const fontPaths = new Map<string, string | undefined>();
 
 export function loadGhosttyAppearance(): Promise<TerminalAppearance> {
+  discardEditedConfig();
   if (cachedAppearance) return Promise.resolve(cachedAppearance);
   appearancePromise ??= buildGhosttyAppearance()
     .then((appearance) => {
       cachedAppearance = appearance;
+      loadedStamp = configStamp();
       return appearance;
     })
     .catch(() => structuredClone(fallback))
@@ -107,6 +111,7 @@ export function configuredThemeName(
 export function loadGhosttyFont(
   variant: FontVariant = "regular",
 ): Promise<{ file: Bun.BunFile; contentType: string } | undefined> {
+  discardEditedConfig();
   const cached = fontPromises.get(variant);
   if (cached) return cached;
   const font = buildGhosttyFont(variant);
@@ -322,6 +327,33 @@ function ghosttyConfigPaths(): string[] {
   ].filter((path): path is string => Boolean(path));
 }
 
+// Ghostty is read again when a config or theme file was touched since the
+// last read, so editing the config only costs a page reload, not a restart.
+// Files an `include` pulled in are invisible here: `ghostty +show-config`
+// resolves them and reports only the result.
+function discardEditedConfig(): void {
+  if (appearancePromise || loadedStamp === undefined) return;
+  if (configStamp() === loadedStamp) return;
+  cachedAppearance = undefined;
+  effectiveConfigPromise = undefined;
+  themeSources.clear();
+  fontPromises.clear();
+  fontPaths.clear();
+}
+
+function configStamp(): string {
+  const sources = new Set([...ghosttyConfigPaths(), ...themeSources]);
+  return [...sources].map((path) => `${path}:${modifiedAt(path)}`).join("|");
+}
+
+function modifiedAt(path: string): number {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
 function readTheme(name: string): string | undefined {
   const home = process.env.HOME ?? "";
   const candidates = [
@@ -335,7 +367,9 @@ function readTheme(name: string): string | undefined {
     join("/Applications/Ghostty.app/Contents/Resources/ghostty/themes", name),
   ];
   const path = candidates.find((candidate) => existsSync(candidate));
-  return path ? readFileSync(path, "utf8") : undefined;
+  if (!path) return;
+  themeSources.add(path);
+  return readFileSync(path, "utf8");
 }
 
 function findFontFile(
