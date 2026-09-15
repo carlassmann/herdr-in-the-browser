@@ -7,6 +7,7 @@ import {
   resolveAppearance,
   watchSystemAppearance,
 } from "./appearance";
+import { writeClipboard } from "./clipboard";
 import { el } from "./dom";
 import {
   encodeModifiedInput,
@@ -127,6 +128,8 @@ export function attachTerminal(
           }
         } else if (message.type === "notify") {
           playNotificationSound();
+        } else if (message.type === "clipboard") {
+          writeClipboard(message.text);
         } else if (!message.running) {
           exited = true;
           onConnectionChange("exited");

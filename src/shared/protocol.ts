@@ -6,7 +6,8 @@ export type ServerMessage =
   | { type: "output"; data: string; cursor: number }
   | { type: "status"; running: boolean }
   | { type: "sync"; cursor: number; reset: boolean }
-  | { type: "notify" };
+  | { type: "notify" }
+  | { type: "clipboard"; text: string };
 
 export type SessionMode = "create" | "attach";
 
