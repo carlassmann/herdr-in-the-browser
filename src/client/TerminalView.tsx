@@ -20,6 +20,10 @@ import {
 } from "./terminal-mouse";
 import { attachPaddingLayout } from "./terminal-padding";
 import { useTerminalControls } from "./TerminalControls";
+import {
+  playNotificationSound,
+  unlockNotificationSound,
+} from "./notification-sound";
 import { ReconnectingTransport, type TransportState } from "./transport";
 
 const ghosttyReady = init();
@@ -125,6 +129,8 @@ export function TerminalView({
               terminal.reset();
               modes.reset();
             }
+          } else if (message.type === "notify") {
+            playNotificationSound();
           } else if (!message.running) {
             exited = true;
             onConnectionChange("exited");
@@ -136,6 +142,7 @@ export function TerminalView({
         },
       });
       disposeWithEffect(() => transport.close());
+      disposeWithEffect(unlockNotificationSound());
       transportRef.current = transport;
 
       const releaseModifiers = () => {

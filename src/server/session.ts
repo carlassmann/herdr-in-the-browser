@@ -7,7 +7,9 @@ import type {
 } from "../shared/protocol";
 import { OrderedInput } from "./ordered-input";
 import { herdrCommand } from "./herdr";
+import { webTerminalConfigPath } from "./herdr-config";
 import { TerminalModeTracker } from "../shared/terminal-modes";
+import { TerminalAlertScanner } from "../shared/terminal-notifications";
 
 const MAX_REPLAY_BYTES = 1024 * 1024;
 
@@ -61,6 +63,7 @@ export class TerminalSession {
   private readonly listeners = new Set<Listener>();
   private readonly replay = new ReplayBuffer();
   private readonly modes = new TerminalModeTracker();
+  private readonly alerts = new TerminalAlertScanner();
   private running = true;
   readonly input = new OrderedInput((message) => this.receive(message));
 
@@ -69,9 +72,13 @@ export class TerminalSession {
     const args =
       mode === "attach" ? ["session", "attach", name] : ["--session", name];
 
+    const configPath = webTerminalConfigPath();
+    // The browser runs Ghostty's own renderer, and Herdr only hands its
+    // notifications to terminals it knows can show them.
     const [file, ...command] = herdrCommand(args, {
       COLORTERM: "truecolor",
-      TERM_PROGRAM: "HerdrWeb",
+      TERM_PROGRAM: "ghostty",
+      ...(configPath ? { HERDR_CONFIG_PATH: configPath } : {}),
     });
 
     this.process = spawn(file!, command, {
@@ -85,6 +92,9 @@ export class TerminalSession {
       const cursor = this.replay.append(data);
       this.modes.observe(data);
       this.publish({ type: "output", data, cursor });
+      for (const alert of this.alerts.scan(data)) {
+        this.publish({ type: "notify", alert });
+      }
     });
     this.process.onExit(() => {
       this.running = false;

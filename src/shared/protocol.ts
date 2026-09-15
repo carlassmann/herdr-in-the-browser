@@ -1,3 +1,5 @@
+import type { TerminalAlert } from "./terminal-notifications";
+
 export type ClientMessage =
   | { type: "input"; data: string }
   | { type: "resize"; cols: number; rows: number };
@@ -5,7 +7,8 @@ export type ClientMessage =
 export type ServerMessage =
   | { type: "output"; data: string; cursor: number }
   | { type: "status"; running: boolean }
-  | { type: "sync"; cursor: number; reset: boolean };
+  | { type: "sync"; cursor: number; reset: boolean }
+  | { type: "notify"; alert: TerminalAlert };
 
 export type SessionMode = "create" | "attach";
 

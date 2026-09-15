@@ -57,6 +57,14 @@ Herdr remains the source of durable session state. If the Bun server restarts, i
 
 Transport is WebSocket first. After repeated WebSocket connection failures the browser falls back to SSE for output and `POST` for input/resize. Network and foreground changes trigger automatic reconnection.
 
+## Notifications
+
+Herdr plays its agent sounds and shows its toasts on the machine hosting the PTY, where nobody is listening. The server therefore spawns the Herdr client with a generated `config.web-terminal.toml` next to your own Herdr config: it sets `[ui.toast] delivery = "terminal"` and disables `[ui.sound]`, so Herdr hands each notification to the outer terminal as an `OSC 9` escape sequence instead. Your desktop Herdr keeps its own configuration.
+
+The session stream is scanned for those sequences and for plain bells, which are sent to the browser as `notify` messages. The browser answers them with a short synthesized ping. Browsers only start audio inside a user gesture, so the first tap or key press in a session opens the audio context; nothing sounds before it.
+
+Herdr only delivers notifications to the terminal when it recognizes the terminal as one that can show them, which is why sessions are spawned with `TERM_PROGRAM=ghostty` — the browser side really is Ghostty's terminal.
+
 ## iPhone controls and PWA
 
 The terminal uses the full available viewport, including iPhone safe areas. Tap the terminal to focus the software keyboard. The top-right **Keys** menu includes `Ctrl`, `Alt`, `Esc`, `Tab`, and arrow keys.
@@ -183,4 +191,5 @@ WebSocket client messages are `input` or `resize`; server messages are `output` 
 - Herdr's own session history/state survives app-server restarts; the browser terminal's prior scrollback does not.
 - iOS may suspend network activity in the background. Herdr continues; output resumes after reconnection.
 - Fallback transports send input over `POST` and receive output over SSE or long polling. The first input sends immediately. Up to two HTTP input/resize requests can overlap, with at least 50 ms between sends. Waiting events are batched, and the server applies numbered batches in order even if requests arrive out of order. A missing batch fails the stream and reconnects; uncertain input is not replayed automatically. Once the client has fallen back it stays there until the page reloads.
+- Notification sound is a synthesized ping, not Herdr's own sound files, and iOS silences audio while the tab is backgrounded.
 - Ghostty settings without a browser-renderer equivalent, including custom shaders and macOS font thickening, are ignored.
