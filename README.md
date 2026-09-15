@@ -1,19 +1,24 @@
 # Herdr Terminal
 
-![Herdr Terminal on iPhone](./docs/herdr-terminal-usage.gif)
+![Herdr Terminal running in a mobile browser](./docs/herdr-terminal-usage.gif)
 
-A self-hosted web terminal for [Herdr](https://herdr.dev), built to reach a Mac
-from a phone when SSH is not an option. The terminal is `ghostty-web`
-(libghostty compiled to WASM) configured from your own `ghostty` config, so the
-fonts, colors, padding, and key handling match the Ghostty window on the host.
+A self-hosted web terminal for [Herdr](https://herdr.dev). It gives you a
+browser tab onto a machine running Herdr, for when SSH into that machine is not
+feasible: a network that only lets HTTPS out, a borrowed computer with no keys
+on it, a phone. The terminal is `ghostty-web` (libghostty compiled to WASM)
+configured from your own `ghostty` config, so the fonts, colors, padding, and
+key handling match the Ghostty window on the host.
 
-A Bun server binds to `127.0.0.1`, owns the PTYs, and serves a React PWA.
-Nothing listens on a public interface; `cloudflared` makes the outbound
-connection and Cloudflare Access does the authentication.
+A Bun server binds to `127.0.0.1`, owns the PTYs, and serves a React PWA. It
+talks to the browser over a WebSocket, and falls back to SSE and then long
+polling where those are blocked or stalled. Nothing listens on a public
+interface; `cloudflared` makes the outbound connection and Cloudflare Access
+does the authentication.
 
 ## Run
 
-Requires macOS, [Bun](https://bun.sh), and `herdr` on `PATH`.
+Requires [Bun](https://bun.sh) and `herdr` on `PATH`. Developed on macOS;
+nothing in the server is macOS-specific except where noted below.
 
 ```sh
 bun install
@@ -66,7 +71,7 @@ Access.
 ### Cloudflare Access
 
 **Required.** The app has no accounts: anyone who reaches it controls a
-terminal on your Mac. Before exposing the hostname, create a self-hosted Access
+terminal on the host. Before exposing the hostname, create a self-hosted Access
 application for it under Zero Trust → Access → Applications, with an Allow
 policy limited to your identity. Do not add a bypass policy.
 
@@ -94,14 +99,15 @@ whether it was started from a plain shell or from inside Herdr.
 ## Ghostty configuration
 
 The server reads `ghostty +show-config` once per process (restart it after
-editing the config). The terminal applies the regular and bold faces, font size,
-cell width/height adjustments, window padding including `window-padding-balance`
-and `window-padding-color = extend`, cursor style and blink, foreground,
+editing the config). The terminal applies the regular and bold faces, font size, cell width/height
+adjustments, window padding including `window-padding-balance` and
+`window-padding-color = extend`, cursor style and blink, foreground,
 background, selection colors, and the first 16 palette colors. Paired
 `light:…,dark:…` themes follow `window-theme`, and `system` follows the device.
 The app chrome derives its colors from the same theme. If the configured font is
-installed as an OTF, TTF, WOFF, or WOFF2 file in a standard macOS font
-directory, it is served to the browser.
+installed as an OTF, TTF, WOFF, or WOFF2 file in one of the macOS font
+directories, the server serves it to the browser; on other hosts, or when no
+file matches, the browser resolves the family name itself.
 
 `ghostty-web` uses Ghostty's parser with a Canvas renderer, not Metal.
 Rasterization, ligature shaping, custom shaders, and macOS font thickening
@@ -124,9 +130,9 @@ When an application enables mouse reporting, clicks, taps, drags, and wheel
 events are encoded as terminal cell events. Hold Shift to bypass reporting and
 select text, as in Ghostty.
 
-On a phone, tap the terminal to raise the keyboard. The **Keys** menu adds
-`Ctrl`, `Alt`, `Esc`, `Tab`, and arrows; `Ctrl` and `Alt` latch for the next key
-press. Add it to the Home Screen from Safari's share sheet for standalone mode.
+On a touch device, tap the terminal to raise the keyboard. The **Keys** menu
+adds `Ctrl`, `Alt`, `Esc`, `Tab`, and arrows; `Ctrl` and `Alt` latch for the
+next key press. Install it to the home screen for standalone mode.
 
 ## Notifications
 
