@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ServerMessage } from "../shared/protocol";
+import type { AttachOptions, ServerMessage } from "../shared/protocol";
 import { collectMessages, type MessageSource } from "./long-poll";
 
 class FakeSource implements MessageSource {
@@ -8,7 +8,10 @@ class FakeSource implements MessageSource {
 
   constructor(private readonly replay: ServerMessage[] = []) {}
 
-  subscribe(listener: (message: ServerMessage) => void, cursor: number) {
+  attach(
+    listener: (message: ServerMessage) => void,
+    { cursor }: AttachOptions,
+  ) {
     this.cursors.push(cursor);
     this.listeners.add(listener);
     listener({ type: "status", running: true });
@@ -29,10 +32,14 @@ describe("long poll collection", () => {
       { type: "output", data: "b", cursor: 2 },
     ]);
 
-    const messages = await collectMessages(source, 0, {
-      timeoutMs: 10_000,
-      batchMs: 0,
-    });
+    const messages = await collectMessages(
+      source,
+      { cursor: 0 },
+      {
+        timeoutMs: 10_000,
+        batchMs: 0,
+      },
+    );
 
     expect(messages.map((message) => message.type)).toEqual([
       "status",
@@ -46,10 +53,14 @@ describe("long poll collection", () => {
 
   test("holds the request until live output arrives", async () => {
     const source = new FakeSource();
-    const pending = collectMessages(source, 5, {
-      timeoutMs: 10_000,
-      batchMs: 0,
-    });
+    const pending = collectMessages(
+      source,
+      { cursor: 5 },
+      {
+        timeoutMs: 10_000,
+        batchMs: 0,
+      },
+    );
     await Promise.resolve();
     expect(source.listeners.size).toBe(1);
 
@@ -65,10 +76,14 @@ describe("long poll collection", () => {
 
   test("batches a burst that follows the first chunk", async () => {
     const source = new FakeSource();
-    const pending = collectMessages(source, 0, {
-      timeoutMs: 10_000,
-      batchMs: 20,
-    });
+    const pending = collectMessages(
+      source,
+      { cursor: 0 },
+      {
+        timeoutMs: 10_000,
+        batchMs: 20,
+      },
+    );
 
     source.publish({ type: "output", data: "1", cursor: 1 });
     source.publish({ type: "output", data: "2", cursor: 2 });
@@ -82,7 +97,11 @@ describe("long poll collection", () => {
   test("returns heartbeats alone once the timeout passes", async () => {
     const source = new FakeSource();
 
-    const messages = await collectMessages(source, 0, { timeoutMs: 5 });
+    const messages = await collectMessages(
+      source,
+      { cursor: 0 },
+      { timeoutMs: 5 },
+    );
 
     expect(messages.map((message) => message.type)).toEqual(["status", "sync"]);
     expect(source.listeners.size).toBe(0);
@@ -90,10 +109,14 @@ describe("long poll collection", () => {
 
   test("returns a stopped status without waiting", async () => {
     const source = new FakeSource();
-    const pending = collectMessages(source, 0, {
-      timeoutMs: 10_000,
-      batchMs: 0,
-    });
+    const pending = collectMessages(
+      source,
+      { cursor: 0 },
+      {
+        timeoutMs: 10_000,
+        batchMs: 0,
+      },
+    );
 
     source.publish({ type: "status", running: false });
 
@@ -103,14 +126,52 @@ describe("long poll collection", () => {
   test("unsubscribes when the client aborts", async () => {
     const source = new FakeSource();
     const controller = new AbortController();
-    const pending = collectMessages(source, 0, {
-      timeoutMs: 10_000,
-      signal: controller.signal,
-    });
+    const pending = collectMessages(
+      source,
+      { cursor: 0 },
+      {
+        timeoutMs: 10_000,
+        signal: controller.signal,
+      },
+    );
 
     controller.abort();
 
     await pending;
+    expect(source.listeners.size).toBe(0);
+  });
+
+  test("caps a burst and detaches so the next poll can replay the rest", async () => {
+    const source = new FakeSource();
+    const pending = collectMessages(
+      source,
+      { cursor: 0 },
+      {
+        timeoutMs: 10_000,
+        maxBytes: 100,
+      },
+    );
+    source.publish({ type: "output", data: "a".repeat(100), cursor: 100 });
+    expect((await pending).at(-1)?.type).toBe("output");
+    expect(source.listeners.size).toBe(0);
+  });
+
+  test("also caps synchronous replay", async () => {
+    const source = new FakeSource([
+      { type: "output", data: "a".repeat(100), cursor: 100 },
+      { type: "output", data: "b".repeat(100), cursor: 200 },
+    ]);
+    const messages = await collectMessages(
+      source,
+      { cursor: 0 },
+      {
+        timeoutMs: 10_000,
+        maxBytes: 100,
+      },
+    );
+    expect(
+      messages.filter((message) => message.type === "output"),
+    ).toHaveLength(1);
     expect(source.listeners.size).toBe(0);
   });
 });

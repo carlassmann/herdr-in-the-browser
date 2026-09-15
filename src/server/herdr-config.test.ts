@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { forwardNotificationsToTerminal } from "./herdr-config";
+import { forwardNotificationsToTerminal } from "./herdr";
 
 describe("forwardNotificationsToTerminal", () => {
   test("adds the sections an empty config lacks", () => {

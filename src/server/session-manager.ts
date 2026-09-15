@@ -15,7 +15,7 @@ export class SessionManager {
     const existing = this.sessions.get(name);
     if (existing?.isRunning()) return existing;
 
-    const session = new TerminalSession(name, mode, () => {
+    const session = TerminalSession.spawn(name, mode, () => {
       if (this.sessions.get(name) === session) this.sessions.delete(name);
     });
     this.sessions.set(name, session);

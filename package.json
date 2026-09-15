@@ -4,12 +4,14 @@
   "description": "A web terminal for Herdr that mirrors your Ghostty configuration, reachable through a Cloudflare Tunnel.",
   "license": "MIT",
   "private": true,
+  "packageManager": "bun@1.4.0",
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development bun --hot src/server/index.ts",
     "build": "bun build --target=bun --production --outdir=dist src/server/index.ts",
-    "check": "bun run typecheck && bun test && bun run build",
-    "format": "prettier --write .",
+    "check": "bun run format:check && bun run typecheck && bun test && bun run build",
+    "format": "prettier --write README.md package.json work.config.js public/sw.js 'src/**/*.{ts,css,html}' '.github/**/*.yml'",
+    "format:check": "prettier --check README.md package.json work.config.js public/sw.js 'src/**/*.{ts,css,html}' '.github/**/*.yml'",
     "start": "NODE_ENV=production bun src/server/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test"

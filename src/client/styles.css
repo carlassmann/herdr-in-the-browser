@@ -177,6 +177,8 @@ h1 {
 }
 .primary-button:focus-visible,
 .icon-button:focus-visible,
+.text-button:focus-visible,
+.session-row:focus-visible,
 .key:focus-visible,
 .dialog-button:focus-visible {
   outline: 2px solid var(--ui-focus);

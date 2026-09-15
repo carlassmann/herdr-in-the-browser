@@ -37,7 +37,11 @@ export function createSessionPicker({
           "div",
           {},
           el("h1", {}, "Herdr Terminal"),
-          el("p", {}, "Pick up an existing workspace or start a new one."),
+          el(
+            "p",
+            {},
+            "Your Herdr terminal in a browser. Pick a session or start one.",
+          ),
         ),
       ),
       form.element,

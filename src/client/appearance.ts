@@ -1,16 +1,8 @@
-import type { TerminalAppearance, TerminalTheme } from "../shared/protocol";
-
-export const fallbackAppearance: TerminalAppearance = {
-  fontFamily: "Geist Mono Variable",
-  fontSize: 15,
-  padding: { top: 2, right: 2, bottom: 2, left: 2 },
-  paddingBalance: "off",
-  paddingColor: "background",
-  colorScheme: "system",
-  cursorBlink: true,
-  cursorStyle: "block",
-  theme: { background: "#09090b", foreground: "#e4e4e7", cursor: "#34d399" },
-};
+import {
+  fallbackAppearance,
+  type TerminalAppearance,
+  type TerminalTheme,
+} from "../shared/protocol";
 
 let appearancePromise: Promise<TerminalAppearance> | undefined;
 

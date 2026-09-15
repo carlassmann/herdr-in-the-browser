@@ -9,8 +9,7 @@ const LONGEST_PARTIAL_SEQUENCE = 1024 * 1024;
 // them: a bell or an OSC 9/777 notification becomes a sound, and an OSC 52
 // write lands in the clipboard.
 export type TerminalSidebandEvent =
-  | { kind: "alert" }
-  | { kind: "clipboard"; text: string };
+  { kind: "alert" } | { kind: "clipboard"; text: string };
 
 export class TerminalSidebandScanner {
   private partialSequence = "";

@@ -1,15 +1,3 @@
-diff --git a/node_modules/ghostty-web/.bun-tag-27226167dcd96cba b/.bun-tag-27226167dcd96cba
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/ghostty-web/.bun-tag-acbd94173e7d362f b/.bun-tag-acbd94173e7d362f
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/ghostty-web/.bun-tag-bd64ff8c02adc8bc b/.bun-tag-bd64ff8c02adc8bc
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/ghostty-web/.bun-tag-e2a4b0c3d9e3b383 b/.bun-tag-e2a4b0c3d9e3b383
-new file mode 100644
-index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/ghostty-web.js b/dist/ghostty-web.js
 index a4ca427b95288e70c782ce303013cd644893dcec..4abce4567147f8da06bb0b23f1d60d9cd6b974fc 100644
 --- a/dist/ghostty-web.js

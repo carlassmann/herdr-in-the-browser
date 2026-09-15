@@ -56,3 +56,42 @@ describe("terminal replay", () => {
     });
   });
 });
+
+describe("sideband replay", () => {
+  test("replays notifications a client missed between polls", () => {
+    const replay = new ReplayBuffer();
+    const seen = replay.append("before");
+    replay.append("after");
+    replay.mark({ type: "notify" });
+    replay.mark({ type: "clipboard", text: "copied" });
+
+    expect(replay.after(seen).markers).toEqual([
+      { type: "notify" },
+      { type: "clipboard", text: "copied" },
+    ]);
+    expect(replay.after(replay.append("later")).markers).toEqual([]);
+  });
+
+  test("does not replay markers after a reset", () => {
+    const replay = new ReplayBuffer(4);
+    replay.append("abc");
+    replay.mark({ type: "notify" });
+    replay.append("def");
+
+    expect(replay.after(0)).toMatchObject({ reset: true, markers: [] });
+  });
+
+  test("keeps the newest markers and drops them with their output", () => {
+    const replay = new ReplayBuffer(6, 1);
+    replay.append("abc");
+    replay.mark({ type: "notify" });
+    replay.mark({ type: "clipboard", text: "kept" });
+    expect(replay.after(0).markers).toEqual([
+      { type: "clipboard", text: "kept" },
+    ]);
+
+    replay.append("def");
+    replay.append("ghi");
+    expect(replay.after(3).markers).toEqual([]);
+  });
+});

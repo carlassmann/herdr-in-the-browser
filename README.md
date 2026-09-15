@@ -2,23 +2,22 @@
 
 ![Herdr Terminal running in a mobile browser](./docs/herdr-terminal-usage.gif)
 
-A self-hosted web terminal for [Herdr](https://herdr.dev). It gives you a
-browser tab onto a machine running Herdr, for when SSH into that machine is not
-feasible: a network that only lets HTTPS out, a borrowed computer with no keys
-on it, a phone. The terminal is `ghostty-web` (libghostty compiled to WASM)
-configured from your own `ghostty` config, so the fonts, colors, padding, and
-key handling match the Ghostty window on the host.
+A self-hosted [Herdr](https://herdr.dev) terminal in your browser, for when SSH
+isn't available. Open a named session from a phone, a borrowed computer, or a
+network that only allows HTTPS. The terminal uses `ghostty-web` and your host's
+Ghostty config, so its fonts, colors, padding, and keys follow your desktop
+terminal.
 
-A Bun server binds to `127.0.0.1`, owns the PTYs, and serves a PWA. It
-talks to the browser over a WebSocket, and falls back to SSE and then long
-polling where those are blocked or stalled. Nothing listens on a public
-interface; `cloudflared` makes the outbound connection and Cloudflare Access
-does the authentication.
+The Bun server listens on `127.0.0.1`. A Cloudflare Tunnel reaches it without
+opening a public port; Cloudflare Access authenticates the operator. Set up
+Access before routing the public hostname. This app has no accounts, and anyone
+who reaches it can control a terminal on the host.
 
 ## Run
 
-Requires [Bun](https://bun.sh) and `herdr` on `PATH`. Developed on macOS;
-nothing in the server is macOS-specific except where noted below.
+Requires [Bun](https://bun.sh) and [Herdr](https://herdr.dev) on `PATH`.
+Developed on macOS. Nothing in the server is macOS-specific except where noted
+below.
 
 ```sh
 bun install
@@ -27,12 +26,8 @@ bun start    # production mode
 bun run check
 ```
 
-One Bun process bundles the frontend and serves the API. There is no separate
-dev server, proxy, or routing framework. The frontend has no UI framework
-either: the screens are a session picker, a header, and a canvas the terminal
-owns, so they are plain TypeScript building DOM nodes. Dropping React,
-`@base-ui`, and the icon package cut the client bundle from 293 KB to 194 KB
-gzipped, which is the load that has to cross the tunnel first.
+The server bundles the frontend and serves the API in one Bun process. The
+frontend is plain TypeScript and `ghostty-web`, without a UI framework.
 
 ## Cloudflare Tunnel
 
@@ -43,7 +38,6 @@ at it.
 brew install cloudflared
 cloudflared tunnel login
 cloudflared tunnel create herdr-terminal
-cloudflared tunnel route dns herdr-terminal herdr.example.com
 ```
 
 `~/.cloudflared/herdr-terminal.yml`:
@@ -59,11 +53,10 @@ ingress:
 ```
 
 The server rejects requests whose `Host` it does not recognize, so list the
-public hostname:
+public hostname when you start it:
 
 ```sh
 PUBLIC_HOSTS=herdr.example.com bun start
-cloudflared tunnel --config ~/.cloudflared/herdr-terminal.yml run herdr-terminal
 ```
 
 Setting `PUBLIC_HOSTS` turns off browser HMR in `bun dev`, because Bun's HMR
@@ -80,6 +73,13 @@ application for it under Zero Trust → Access → Applications, with an Allow
 policy limited to your identity. Do not add a bypass policy.
 
 The `Host`/`Origin` check blocks DNS rebinding. It is not authentication.
+
+Once Access protects the hostname, route DNS and start the tunnel:
+
+```sh
+cloudflared tunnel route dns herdr-terminal herdr.example.com
+cloudflared tunnel --config ~/.cloudflared/herdr-terminal.yml run herdr-terminal
+```
 
 ## Sessions
 
@@ -153,7 +153,8 @@ is listening. The server writes a `config.web-terminal.toml` next to your Herdr
 config that sets `[ui.toast] delivery = "terminal"` and disables `[ui.sound]`,
 and spawns the session with it. Herdr then emits `OSC 9` instead, which the
 server forwards to the browser as a `notify` message and the browser answers
-with a short synthesized ping. Your desktop Herdr config is untouched.
+with a short synthesized ping. Your desktop Herdr config is untouched. Each new
+session refreshes the derived file if the source config changed.
 
 Sessions run with `TERM_PROGRAM=ghostty` because Herdr only sends notifications
 to terminals it knows can show them. Browsers need a user gesture before they
@@ -166,9 +167,14 @@ output with `POST` for input, and from there to long polling if SSE stalls.
 `?transport=sse` or `?transport=poll` skips ahead. Network and visibility
 changes trigger reconnection.
 
-Fallback input is batched, numbered, and applied in order; a gap fails the
-stream and reconnects rather than replaying uncertain input. Once the client has
-fallen back it stays there until the page reloads.
+Fallback input is batched, numbered, and applied in order. A request that fails
+or is cut off by a reconnect is sent again under the same number, and the server
+applies each number once, so typed input is neither lost nor doubled. When the
+server has given up on a stream it answers 409 and the client starts a new one.
+Once the client has fallen back it stays there until the page reloads.
+Numbered retries stay on `POST` even if WebSocket recovers; direct WebSocket
+input resumes only after they are acknowledged. Slow output clients are closed
+after 1 MiB queues up and reconnect through the replay buffer.
 
 ## Configuration
 

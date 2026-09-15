@@ -1,19 +1,35 @@
-import { spawn, type IPty } from "bun-pty";
-import type {
-  ClientMessage,
-  ServerMessage,
-  SessionMode,
-  SessionSummary,
+import type { IPty } from "bun-pty";
+import {
+  clampTerminalSize,
+  type AttachOptions,
+  type ClientMessage,
+  type ServerMessage,
+  type SessionMode,
+  type SessionSummary,
 } from "../shared/protocol";
 import { OrderedInput } from "./ordered-input";
-import { herdrCommand } from "./herdr";
-import { webTerminalConfigPath } from "./herdr-config";
+import { spawnHerdr } from "./herdr";
 import { TerminalModeTracker } from "../shared/terminal-modes";
 import { TerminalSidebandScanner } from "../shared/terminal-sideband";
 
 const MAX_REPLAY_BYTES = 1024 * 1024;
+const MAX_REPLAY_MARKERS = 256;
 
 type Listener = (message: ServerMessage) => void;
+
+// The part of a PTY the session drives. bun-pty provides it in production; a
+// test hands in a scripted one.
+export type TerminalProcess = Pick<
+  IPty,
+  "onData" | "onExit" | "write" | "resize" | "kill"
+>;
+
+// Fallback input carries a stream id and a sequence number so it can be
+// applied in order and repeats can be dropped.
+export interface InputOrdering {
+  stream: string;
+  sequence: number;
+}
 
 interface ReplayChunk {
   data: string;
@@ -21,12 +37,23 @@ interface ReplayChunk {
   cursor: number;
 }
 
+// A notification or clipboard write has no bytes of its own in the output
+// stream, so it is pinned to the cursor of the output it arrived with.
+interface ReplayMarker {
+  message: ServerMessage;
+  cursor: number;
+}
+
 export class ReplayBuffer {
   private chunks: ReplayChunk[] = [];
+  private markers: ReplayMarker[] = [];
   private bytes = 0;
   private cursor = 0;
 
-  constructor(private readonly maxBytes = MAX_REPLAY_BYTES) {}
+  constructor(
+    private readonly maxBytes = MAX_REPLAY_BYTES,
+    private readonly maxMarkers = MAX_REPLAY_MARKERS,
+  ) {}
 
   append(data: string): number {
     const bytes = Buffer.byteLength(data);
@@ -36,13 +63,25 @@ export class ReplayBuffer {
     while (this.bytes > this.maxBytes && this.chunks.length > 1) {
       this.bytes -= this.chunks.shift()?.bytes ?? 0;
     }
+    const oldestCursor = this.cursor - this.bytes;
+    this.markers = this.markers.filter(
+      (marker) => marker.cursor > oldestCursor,
+    );
     return this.cursor;
   }
 
+  mark(message: ServerMessage): void {
+    this.markers.push({ message, cursor: this.cursor });
+    if (this.markers.length > this.maxMarkers) this.markers.shift();
+  }
+
+  // Markers replay only for a client that missed a gap, never after a reset:
+  // an old clipboard write or a burst of stale bells would be wrong then.
   after(cursor: number): {
     cursor: number;
     reset: boolean;
     chunks: ReadonlyArray<{ data: string; cursor: number }>;
+    markers: ReadonlyArray<ServerMessage>;
   } {
     const oldestCursor = this.cursor - this.bytes;
     const reset = cursor < oldestCursor || cursor > this.cursor;
@@ -53,54 +92,54 @@ export class ReplayBuffer {
       chunks: this.chunks
         .filter((chunk) => chunk.cursor > replayCursor)
         .map(({ data, cursor }) => ({ data, cursor })),
+      markers: reset
+        ? []
+        : this.markers
+            .filter((marker) => marker.cursor > replayCursor)
+            .map((marker) => marker.message),
     };
   }
 }
 
 export class TerminalSession {
-  readonly name: string;
-  private readonly process: IPty;
   private readonly listeners = new Set<Listener>();
   private readonly replay = new ReplayBuffer();
   private readonly modes = new TerminalModeTracker();
   private readonly sideband = new TerminalSidebandScanner();
+  private readonly orderedInput = new OrderedInput((message) =>
+    this.apply(message),
+  );
   private running = true;
-  readonly input = new OrderedInput((message) => this.receive(message));
 
-  constructor(name: string, mode: SessionMode, onExit: () => void = () => {}) {
-    this.name = name;
-    const args =
-      mode === "attach" ? ["session", "attach", name] : ["--session", name];
+  // Runs Herdr in a fresh PTY. The browser runs Ghostty's own renderer, and
+  // Herdr only hands its notifications to terminals it knows can show them.
+  // The person sits behind a browser, not at the host, so the session presents
+  // as an SSH login: Herdr then copies with OSC 52 instead of the host
+  // clipboard.
+  static spawn(
+    name: string,
+    mode: SessionMode,
+    onExit: () => void = () => {},
+  ): TerminalSession {
+    return new TerminalSession(name, spawnHerdr(name, mode), onExit);
+  }
 
-    const configPath = webTerminalConfigPath();
-    // The browser runs Ghostty's own renderer, and Herdr only hands its
-    // notifications to terminals it knows can show them. The person sits
-    // behind a browser, not at the host, so the session presents as an SSH
-    // login: Herdr then copies with OSC 52 instead of the host clipboard.
-    const [file, ...command] = herdrCommand(args, {
-      COLORTERM: "truecolor",
-      TERM_PROGRAM: "ghostty",
-      SSH_TTY: "/dev/tty",
-      ...(configPath ? { HERDR_CONFIG_PATH: configPath } : {}),
-    });
-
-    this.process = spawn(file!, command, {
-      name: "xterm-256color",
-      cols: 80,
-      rows: 24,
-      cwd: process.cwd(),
-    });
-
+  constructor(
+    readonly name: string,
+    private readonly process: TerminalProcess,
+    onExit: () => void = () => {},
+  ) {
     this.process.onData((data) => {
       const cursor = this.replay.append(data);
       this.modes.observe(data);
       this.publish({ type: "output", data, cursor });
       for (const event of this.sideband.scan(data)) {
-        this.publish(
+        const message: ServerMessage =
           event.kind === "alert"
             ? { type: "notify" }
-            : { type: "clipboard", text: event.text },
-        );
+            : { type: "clipboard", text: event.text };
+        this.replay.mark(message);
+        this.publish(message);
       }
     });
     this.process.onExit(() => {
@@ -121,7 +160,13 @@ export class TerminalSession {
     return this.running;
   }
 
-  subscribe(listener: Listener, cursor = 0): () => void {
+  // Connects a client. Its terminal size is applied before anything is sent,
+  // then it hears, in this order: the session status, where the replay starts
+  // and whether the client must reset, the terminal modes to restore after a
+  // reset, the output it missed, and the notifications that came with it.
+  // The listener stays attached for live messages until detached.
+  attach(listener: Listener, { cursor, size }: AttachOptions): () => void {
+    if (size) this.apply({ type: "resize", ...size });
     this.listeners.add(listener);
     listener({ type: "status", running: this.running });
     const replay = this.replay.after(cursor);
@@ -132,6 +177,7 @@ export class TerminalSession {
     for (const chunk of replay.chunks) {
       listener({ type: "output", ...chunk });
     }
+    for (const marker of replay.markers) listener(marker);
     return () => this.listeners.delete(listener);
   }
 
@@ -139,38 +185,31 @@ export class TerminalSession {
     if (this.running) this.process.kill();
   }
 
-  receive(message: ClientMessage): void {
+  // Input from a live connection applies at once. Numbered input waits for
+  // its predecessors and rejects once the stream has a gap it cannot fill.
+  receive(message: ClientMessage, ordering?: InputOrdering): Promise<void> {
+    if (ordering) {
+      return this.orderedInput.receive(
+        ordering.stream,
+        ordering.sequence,
+        message,
+      );
+    }
+    this.apply(message);
+    return Promise.resolve();
+  }
+
+  private apply(message: ClientMessage): void {
     if (!this.running) return;
     if (message.type === "input") {
       this.process.write(message.data);
       return;
     }
-    const cols = clampDimension(message.cols, 2, 500);
-    const rows = clampDimension(message.rows, 1, 300);
+    const { cols, rows } = clampTerminalSize(message);
     this.process.resize(cols, rows);
   }
 
   private publish(message: ServerMessage): void {
     for (const listener of this.listeners) listener(message);
   }
-}
-
-function clampDimension(
-  value: number,
-  minimum: number,
-  maximum: number,
-): number {
-  if (!Number.isFinite(value)) return minimum;
-  return Math.min(maximum, Math.max(minimum, Math.floor(value)));
-}
-
-export function isClientMessage(value: unknown): value is ClientMessage {
-  if (!value || typeof value !== "object") return false;
-  const message = value as Record<string, unknown>;
-  if (message.type === "input") return typeof message.data === "string";
-  return (
-    message.type === "resize" &&
-    typeof message.cols === "number" &&
-    typeof message.rows === "number"
-  );
 }
