@@ -2,10 +2,13 @@
 
 Herdr. In your browser.
 
+When SSH isn't practical, pick up a [Herdr](https://herdr.dev) session from your
+phone or another computer.
+
 ![Herdr running in a mobile browser](./docs/herdr-in-browser.gif)
 
-Open the [Herdr](https://herdr.dev) sessions on your machine from a browser.
-Start one, pick one up, or leave it running and return later. That's it.
+Start a new session, rejoin one that's running, or leave it and return later.
+That's it.
 
 ## Run
 
